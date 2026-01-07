@@ -1,0 +1,8 @@
+{
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "name": "Gemini Robotics AI Controller",
+  "description": "Autonomous navigation and voice interaction controller for Arduino robot cars."
+}
