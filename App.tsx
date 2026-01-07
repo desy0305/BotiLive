@@ -60,7 +60,7 @@ function App() {
         const data = await res.json();
         setDistance(data.d);
         setMode(data.m);
-      } catch (e) { /* Robot offline */ }
+      } catch (e) { /* Silent fail for robot offline */ }
     }, 1000);
     return () => clearInterval(timer);
   }, [ip, setDistance, setMode]);
@@ -92,12 +92,10 @@ function App() {
         const hybridContext = `
           ${prompt}
           ${hwContext}
-          
           CURRENT SENSOR DATA: Ultrasonic Distance = ${distRef.current}cm
           CURRENT MISSION: ${mission}
           ACTION MEMORY: ${historyRef.current.slice(-5).join(' -> ')}
-          ORDERS: ${JSON.stringify(orders)}
-          
+          TABLE ORDERS: ${JSON.stringify(orders)}
           Decision required for current frame:
         `;
 
@@ -130,16 +128,19 @@ function App() {
         
         const cmd = decision.command?.toLowerCase() || 'stop';
         if (cmd !== 'stop') {
-          setLogs(prev => [`[PILOT] ${cmd.toUpperCase()} (${(decision.confidence * 100).toFixed(0)}%) - ${decision.reasoning.substring(0, 30)}`, ...prev].slice(0, 50));
+          setLogs(prev => [`[PILOT] ${cmd.toUpperCase()} (${(decision.confidence * 100).toFixed(0)}%) - ${decision.reasoning.substring(0, 40)}`, ...prev].slice(0, 50));
           setHistory(prev => [...prev, cmd].slice(-10));
 
-          // Physical Movement
           const aiSpeed = Math.round(tuning.speed * (0.6 + decision.confidence * 0.4));
-          fetch(`http://${ip}/move?dir=${cmd}&speed=${aiSpeed}`, { mode: 'no-cors' });
-          setTimeout(() => { fetch(`http://${ip}/move?dir=stop`, { mode: 'no-cors' }).catch(() => {}); }, tuning.duration);
+          fetch(`http://${ip}/move?dir=${cmd}&speed=${aiSpeed}`, { mode: 'no-cors' }).catch(()=>{});
+          setTimeout(() => { fetch(`http://${ip}/move?dir=stop`, { mode: 'no-cors' }).catch(()=>{}); }, tuning.duration);
         }
       } catch (err: any) {
-        setLogs(prev => [`[ERR] Vision Pilot: ${err.message}`, ...prev].slice(0, 50));
+        if (err.message?.includes("404")) {
+           setLogs(prev => [`[ERR] Model ${model} not accessible. Check API Project.`, ...prev].slice(0, 50));
+        } else {
+           setLogs(prev => [`[ERR] Vision Pilot Cycle Failed: ${err.message}`, ...prev].slice(0, 50));
+        }
       } finally {
         if (aiRef.current) cycleTimer = setTimeout(runVisionPulse, tuning.cycle);
       }
@@ -150,38 +151,32 @@ function App() {
   }, [isAiActive, model, ip, prompt, tuning, isThinking, setThought, setLogs, setHistory, hwContext, mission, orders]);
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-[var(--bg-color)] p-2 gap-2 overflow-hidden">
-      {/* 50:50 Layout Container */}
-      <div className="flex grow gap-2 overflow-hidden">
-        
-        {/* Left Half: Vision & HUD */}
-        <div className="w-1/2 flex flex-col min-w-0 border-r border-white/10 pr-2">
-          <div className="flex justify-between items-center mb-2 px-2">
-             <h2 className="text-[10px] font-bold text-[var(--accent-color)] tracking-widest uppercase flex items-center gap-2">
-               <div className="w-2 h-2 rounded-full bg-red-600 animate-pulse" />
-               Tactical Vision Feed
-             </h2>
-             <div className="text-[9px] font-mono text-zinc-500 uppercase">
-               Sync: {isLiveActive ? 'Live Brain Attached' : 'Vision Pilot Only'}
+    <div className="flex flex-col h-[100dvh] bg-[var(--bg-color)] p-2 gap-2 overflow-hidden selection:bg-cyan-500/30">
+      {/* HUD Bar */}
+      <div className="flex justify-between items-center bg-black/40 px-3 py-1.5 rounded border border-white/5 shrink-0">
+          <div className="flex items-center gap-4">
+             <h1 className="text-[10px] font-bold tracking-[0.3em] text-[var(--accent-color)] uppercase flex items-center gap-2">
+               <div className="w-2 h-2 rounded-full bg-cyan-500 shadow-[0_0_8px_cyan]" />
+               Robotics Core v9.6-PROD
+             </h1>
+          </div>
+          <div className="flex items-center gap-3">
+             {isLiveActive && <LiveAudioHandler />}
+             <div className="text-[8px] font-mono text-zinc-600 bg-black/60 px-2 py-0.5 rounded border border-zinc-800">
+               SYS_ACTIVE_MODELS: [${model}, NativeAudio]
              </div>
           </div>
+      </div>
+
+      {/* Main Workview (50:50) */}
+      <div className="flex grow gap-2 overflow-hidden">
+        <div className="w-1/2 flex flex-col min-w-0">
           <Content />
         </div>
-
-        {/* Right Half: Mission Control & Brain Hub */}
-        <div className="w-1/2 shrink-0 overflow-y-auto custom-scrollbar flex flex-col gap-2">
-          <div className="flex justify-between items-center mb-1">
-             <h2 className="text-[10px] font-bold text-white tracking-widest uppercase">Command Hub v9.5</h2>
-             {isLiveActive && <LiveAudioHandler />}
-          </div>
+        <div className="w-1/2 flex flex-col min-w-0 bg-card-bg/40 rounded-lg p-2 border border-white/5 shadow-2xl">
           <ControlPanel />
         </div>
       </div>
-      
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
-      `}</style>
     </div>
   );
 }

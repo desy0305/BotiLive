@@ -20,6 +20,7 @@
 // limitations under the License.
 
 import {useAtom} from 'jotai';
+import {useCallback} from 'react';
 // Added missing atom imports
 import {
   BoundingBoxes2DAtom,
@@ -31,7 +32,8 @@ import {
   ResponseJsonAtom,
 } from './atoms';
 
-export function useResetState() {
+// Fix: Explicitly defining the return type as () => void and using useCallback to ensure stable and correctly inferred function signatures.
+export function useResetState(): () => void {
   const [, setImageSent] = useAtom(ImageSentAtom);
   const [, setBoundingBoxes2D] = useAtom(BoundingBoxes2DAtom);
   const [, setBoundingBoxMasks] = useAtom(BoundingBoxMasksAtom);
@@ -40,7 +42,7 @@ export function useResetState() {
   const [, setRequestJson] = useAtom(RequestJsonAtom);
   const [, setResponseJson] = useAtom(ResponseJsonAtom);
 
-  return () => {
+  return useCallback(() => {
     setImageSent(false);
     setBoundingBoxes2D([]);
     setBoundingBoxMasks([]);
@@ -48,5 +50,13 @@ export function useResetState() {
     setPoints([]);
     setRequestJson('');
     setResponseJson('');
-  };
+  }, [
+    setImageSent,
+    setBoundingBoxes2D,
+    setBoundingBoxMasks,
+    setBumpSession,
+    setPoints,
+    setRequestJson,
+    setResponseJson,
+  ]);
 }

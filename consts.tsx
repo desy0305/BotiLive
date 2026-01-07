@@ -1,3 +1,4 @@
+
 /* tslint:disable */
 /**
  * @license
@@ -50,27 +51,18 @@ export const segmentationColors = [
 ];
 export const segmentationColorsRgb = segmentationColors.map((c) => hexToRgb(c));
 
-export const imageOptions: string[] = await Promise.all(
-  [
-    'aloha-arms-table.png',
-    'cart.png',
-    'mango.png',
-    'gameboard.png',
-    'aloha_desk.png',
-    'soarm-block.png',
-    'top-down-fruits.png',
-    'aloha-arms-trash.jpg',
-    'grapes.png',
-  ].map(async (i) =>
-    URL.createObjectURL(
-      await (
-        await fetch(
-          `https://storage.googleapis.com/generativeai-downloads/images/robotics/applet-robotics-spatial-understanding/${i}`,
-        )
-      ).blob(),
-    ),
-  ),
-);
+// Fix: Removed top-level await and fetch logic to prevent type inference issues (never type) and improve module loading reliability.
+export const imageOptions: string[] = [
+  'aloha-arms-table.png',
+  'cart.png',
+  'mango.png',
+  'gameboard.png',
+  'aloha_desk.png',
+  'soarm-block.png',
+  'top-down-fruits.png',
+  'aloha-arms-trash.jpg',
+  'grapes.png',
+].map((i) => `https://storage.googleapis.com/generativeai-downloads/images/robotics/applet-robotics-spatial-understanding/${i}`);
 
 export const lineOptions = {
   size: 8,

@@ -12,44 +12,31 @@ import {
   RobotDistanceAtom,
   MissionStateAtom,
   OrderStorageAtom,
-  TuningParamsAtom
+  TuningParamsAtom,
+  HasApiKeySelectedAtom
 } from './atoms';
 
-// Manual encoding/decoding functions as per guidelines
+// Manual encoding/decoding functions
 function decode(base64: string) {
   const binaryString = atob(base64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
   return bytes;
 }
 
 function encode(bytes: Uint8Array) {
   let binary = '';
-  const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
 }
 
-async function decodeAudioData(
-  data: Uint8Array,
-  ctx: AudioContext,
-  sampleRate: number,
-  numChannels: number,
-): Promise<AudioBuffer> {
+async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: number, numChannels: number): Promise<AudioBuffer> {
   const dataInt16 = new Int16Array(data.buffer);
   const frameCount = dataInt16.length / numChannels;
   const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
-
   for (let channel = 0; channel < numChannels; channel++) {
     const channelData = buffer.getChannelData(channel);
-    for (let i = 0; i < frameCount; i++) {
-      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
-    }
+    for (let i = 0; i < frameCount; i++) channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
   }
   return buffer;
 }
@@ -65,6 +52,7 @@ export function LiveAudioHandler() {
   const [history] = useAtom(ActionHistoryAtom);
   const [mission, setMission] = useAtom(MissionStateAtom);
   const [orders, setOrders] = useAtom(OrderStorageAtom);
+  const [hasKey, setHasKey] = useAtom(HasApiKeySelectedAtom);
   
   const [isMicActive, setIsMicActive] = useState(false);
   const sessionRef = useRef<any>(null);
@@ -73,7 +61,22 @@ export function LiveAudioHandler() {
     setLogs(prev => [`[BRAIN] [${type.toUpperCase()}] ${msg}`, ...prev].slice(0, 50));
   };
 
+  const handleKeySelect = async () => {
+    await (window as any).aistudio.openSelectKey();
+    setHasKey(true);
+  };
+
   useEffect(() => {
+    const checkKey = async () => {
+      const selected = await (window as any).aistudio.hasSelectedApiKey();
+      setHasKey(selected);
+    };
+    checkKey();
+  }, [setHasKey]);
+
+  useEffect(() => {
+    if (!hasKey) return;
+
     let nextStartTime = 0;
     const inputAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({sampleRate: 16000});
     const outputAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({sampleRate: 24000});
@@ -87,14 +90,14 @@ export function LiveAudioHandler() {
     async function connectBrain() {
       try {
         micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        // Fixed: Create a new GoogleGenAI instance right before making an API call
+        // Create instance right before use to ensure latest key
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
         
         const tools = [{
           name: 'move_robot',
           parameters: {
             type: Type.OBJECT,
-            description: 'Execute a physical movement command.',
+            description: 'Execute physical movement.',
             properties: {
               dir: { type: Type.STRING, enum: ['fwd', 'bwd', 'left', 'right', 'stop'] },
               speed: { type: Type.NUMBER },
@@ -106,12 +109,8 @@ export function LiveAudioHandler() {
           name: 'log_mission',
           parameters: {
             type: Type.OBJECT,
-            description: 'Update the mission goal or log a table order.',
-            properties: {
-              goal: { type: Type.STRING },
-              table: { type: Type.STRING },
-              items: { type: Type.STRING }
-            }
+            description: 'Log memory or mission updates.',
+            properties: { goal: { type: Type.STRING }, table: { type: Type.STRING }, items: { type: Type.STRING } }
           }
         }];
 
@@ -121,22 +120,18 @@ export function LiveAudioHandler() {
             onopen: () => {
               addLog("Brain Synchronized", "sys");
               setIsMicActive(true);
-              
-              // Audio In
               const source = inputAudioCtx.createMediaStreamSource(micStream!);
               const scriptProcessor = inputAudioCtx.createScriptProcessor(4096, 1, 1);
               scriptProcessor.onaudioprocess = (e) => {
                 const input = e.inputBuffer.getChannelData(0);
                 const int16 = new Int16Array(input.length);
                 for (let i = 0; i < input.length; i++) int16[i] = input[i] * 32768;
-                // Fixed: Use manual encode function
                 const base64 = encode(new Uint8Array(int16.buffer));
                 sessionPromise.then(s => s.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } }));
               };
               source.connect(scriptProcessor);
               scriptProcessor.connect(inputAudioCtx.destination);
 
-              // Video In (1fps)
               videoInterval = setInterval(() => {
                 const video = document.querySelector('video');
                 if (!video) return;
@@ -148,29 +143,18 @@ export function LiveAudioHandler() {
               }, 1200);
             },
             onmessage: async (message: LiveServerMessage) => {
-              // Audio Out
               const audioBase64 = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
               if (audioBase64) {
                 nextStartTime = Math.max(nextStartTime, outputAudioCtx.currentTime);
-                // Fixed: Use manual decode and decodeAudioData functions
-                const audioBuffer = await decodeAudioData(
-                  decode(audioBase64),
-                  outputAudioCtx,
-                  24000,
-                  1,
-                );
+                const audioBuffer = await decodeAudioData(decode(audioBase64), outputAudioCtx, 24000, 1);
                 const source = outputAudioCtx.createBufferSource();
                 source.buffer = audioBuffer;
                 source.connect(outputNode);
-                source.addEventListener('ended', () => {
-                  sources.delete(source);
-                });
+                source.addEventListener('ended', () => sources.delete(source));
                 source.start(nextStartTime);
                 nextStartTime += audioBuffer.duration;
                 sources.add(source);
               }
-
-              // Tool Execution
               if (message.toolCall) {
                 const results = [];
                 for (const fc of message.toolCall.functionCalls) {
@@ -178,8 +162,8 @@ export function LiveAudioHandler() {
                     const {dir, speed, reason} = fc.args as any;
                     addLog(`ACTION: ${dir.toUpperCase()} (${reason})`, "ai");
                     setThought(reason);
-                    fetch(`http://${ip}/move?dir=${dir}&speed=${speed}`, { mode: 'no-cors' });
-                    setTimeout(() => fetch(`http://${ip}/move?dir=stop`, { mode: 'no-cors' }), tuning.duration);
+                    fetch(`http://${ip}/move?dir=${dir}&speed=${speed}`, { mode: 'no-cors' }).catch(()=>{});
+                    setTimeout(() => fetch(`http://${ip}/move?dir=stop`, { mode: 'no-cors' }).catch(()=>{}), tuning.duration);
                   }
                   else if (fc.name === 'log_mission') {
                     const {goal, table, items} = fc.args as any;
@@ -196,7 +180,14 @@ export function LiveAudioHandler() {
                 nextStartTime = 0;
               }
             },
-            onerror: (e) => addLog("Brain Connectivity Lost", "err"),
+            onerror: (e: any) => {
+              if (e.message?.includes("not found")) {
+                addLog("404 Error: Access Restricted. Select a valid API Key project.", "err");
+                setHasKey(false);
+              } else {
+                addLog("Brain Connectivity Lost", "err");
+              }
+            },
             onclose: () => setIsMicActive(false),
           },
           config: {
@@ -205,13 +196,12 @@ export function LiveAudioHandler() {
             tools: [{ functionDeclarations: tools as any }],
             systemInstruction: `
               ${prompt}\n${hw}\n
-              STATE: Distance=${distance}cm, Mission=${mission}, Memory=${JSON.stringify(orders)}.
-              History: ${history.join('->')}
+              STATE: Distance=${distance}cm, Mission=${mission}, Orders=${JSON.stringify(orders)}.
             `
           }
         });
         sessionRef.current = sessionPromise;
-      } catch (e) { addLog("Critical Brain Init Error", "err"); }
+      } catch (e) { addLog("Critical Brain Error", "err"); }
     }
 
     connectBrain();
@@ -222,12 +212,20 @@ export function LiveAudioHandler() {
       inputAudioCtx.close();
       outputAudioCtx.close();
     };
-  }, [ip, distance, prompt, hw, mission, orders, history, tuning.duration, setMission, setOrders, setThought]);
+  }, [hasKey, ip, distance, prompt, hw, mission, orders, tuning.duration, setMission, setOrders, setThought, setHasKey]);
+
+  if (!hasKey) {
+    return (
+      <button onClick={handleKeySelect} className="bg-red-900/60 border-red-500 text-red-200 text-[10px] px-4 py-1 animate-pulse">
+        ⚠️ ACTION REQUIRED: Select API Key Project
+      </button>
+    );
+  }
 
   return (
     <div className="flex items-center gap-2 bg-black/50 px-3 py-1 rounded-full border border-cyan-500/30">
       <div className={`w-2 h-2 rounded-full ${isMicActive ? 'bg-cyan-500 animate-ping' : 'bg-red-500'}`} />
-      <span className="text-[10px] text-cyan-400 font-mono tracking-tighter uppercase">Live Brain Attached</span>
+      <span className="text-[10px] text-cyan-400 font-mono tracking-tighter uppercase">Live Brain Online</span>
     </div>
   );
 }
