@@ -9,7 +9,7 @@ export const IsLiveActiveAtom = atom<boolean>(false);
 export const RobotDistanceAtom = atom<number>(-1);
 export const RobotModeAtom = atom<string>('UNKNOWN');
 export const LogsAtom = atom<string[]>([]);
-export const HasApiKeySelectedAtom = atom<boolean>(false);
+export const HasApiKeySelectedAtom = atom<boolean>(true); // Default true for cloud envs
 
 export const HardwareContextAtom = atom<string>(`HARDWARE_SPEC: 
 - Type: 2WD Arduino Robot Car
@@ -21,18 +21,27 @@ export const MissionStateAtom = atom<string>('Standby');
 export const OrderStorageAtom = atom<Record<string, string>>({}); 
 export const ActionHistoryAtom = atom<string[]>([]); 
 
-export const SystemPromptAtom = atom<string>(`You are an AI Waitress and Concierge Robot.
-Your job is to navigate safely, interact with customers, and remember orders.
-If you see a human, greet them. If you take an order, save it to memory.
-ALWAYS respect the SENSOR DATA distance threshold.`);
+export const SystemPromptAtom = atom<string>(`You are a small 2-wheeled robot with SMOOTH speed-controlled movement.
+Perspective: Obstacles closer to bottom are NEAR.
+Mission: Navigate safely. Your CONFIDENCE value directly controls motor SPEED (low confidence = slow speed).
+Output: JSON { "reasoning": "string", "command": "fwd" | "left" | "right" | "stop" | "bwd", "confidence": 0.0-1.0 }
+Rules:
+1. If path clearly open -> "fwd" with confidence 0.7-1.0 (faster)
+2. If obstacle nearby -> "left"/"right" with confidence 0.3-0.6 (slower, cautious)
+3. If obstacle very close (<15cm) -> "bwd" with confidence 0.5
+4. AVOID oscillating - if you just turned, continue forward or same direction
+5. Be SMOOTH - confidence controls speed, so adjust confidence for the situation`);
 
 export const TuningParamsAtom = atom({
   speed: 180,
-  turnSpeed: 150,
-  duration: 450,
-  safeDist: 30,
-  cycle: 1500,
-  temperature: 0.1
+  turnSpeed: 140,
+  turnMs: 600,
+  minPower: 80,
+  pulseMs: 1000,
+  safeDist: 35,
+  aiSmooth: 50,
+  temperature: 0.2,
+  cycle: 2000
 });
 
 export const AiThoughtAtom = atom<string>('Neural Core Initialized...');

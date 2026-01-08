@@ -32,8 +32,9 @@ import {
   ResponseJsonAtom,
 } from './atoms';
 
-// Fix: Explicitly defining the return type as () => void and using useCallback to ensure stable and correctly inferred function signatures.
-export function useResetState(): () => void {
+// Fix: Explicitly defining the return type as '() => void' to prevent TypeScript's 
+// type inference from incorrectly collapsing to 'never' in consumers of this hook.
+export const useResetState = (): (() => void) => {
   const [, setImageSent] = useAtom(ImageSentAtom);
   const [, setBoundingBoxes2D] = useAtom(BoundingBoxes2DAtom);
   const [, setBoundingBoxMasks] = useAtom(BoundingBoxMasksAtom);
@@ -59,4 +60,4 @@ export function useResetState(): () => void {
     setRequestJson,
     setResponseJson,
   ]);
-}
+};

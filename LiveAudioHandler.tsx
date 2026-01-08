@@ -61,19 +61,6 @@ export function LiveAudioHandler() {
     setLogs(prev => [`[BRAIN] [${type.toUpperCase()}] ${msg}`, ...prev].slice(0, 50));
   };
 
-  const handleKeySelect = async () => {
-    await (window as any).aistudio.openSelectKey();
-    setHasKey(true);
-  };
-
-  useEffect(() => {
-    const checkKey = async () => {
-      const selected = await (window as any).aistudio.hasSelectedApiKey();
-      setHasKey(selected);
-    };
-    checkKey();
-  }, [setHasKey]);
-
   useEffect(() => {
     if (!hasKey) return;
 
@@ -89,15 +76,15 @@ export function LiveAudioHandler() {
 
     async function connectBrain() {
       try {
+        addLog("Initializing Neural Stream...", "sys");
         micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        // Create instance right before use to ensure latest key
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
         
         const tools = [{
           name: 'move_robot',
           parameters: {
             type: Type.OBJECT,
-            description: 'Execute physical movement.',
+            description: 'Move the physical robot chassis.',
             properties: {
               dir: { type: Type.STRING, enum: ['fwd', 'bwd', 'left', 'right', 'stop'] },
               speed: { type: Type.NUMBER },
@@ -109,7 +96,7 @@ export function LiveAudioHandler() {
           name: 'log_mission',
           parameters: {
             type: Type.OBJECT,
-            description: 'Log memory or mission updates.',
+            description: 'Update robot goals or customer orders.',
             properties: { goal: { type: Type.STRING }, table: { type: Type.STRING }, items: { type: Type.STRING } }
           }
         }];
@@ -160,10 +147,10 @@ export function LiveAudioHandler() {
                 for (const fc of message.toolCall.functionCalls) {
                   if (fc.name === 'move_robot') {
                     const {dir, speed, reason} = fc.args as any;
-                    addLog(`ACTION: ${dir.toUpperCase()} (${reason})`, "ai");
+                    addLog(`MOTOR: ${dir.toUpperCase()} (${reason})`, "ai");
                     setThought(reason);
-                    fetch(`http://${ip}/move?dir=${dir}&speed=${speed}`, { mode: 'no-cors' }).catch(()=>{});
-                    setTimeout(() => fetch(`http://${ip}/move?dir=stop`, { mode: 'no-cors' }).catch(()=>{}), tuning.duration);
+                    fetch(`http://${ip}/move?dir=${dir}&speed=${speed}`, { mode: 'no-cors' }).catch(() => {});
+                    setTimeout(() => fetch(`http://${ip}/move?dir=stop`, { mode: 'no-cors' }).catch(() => {}), tuning.turnMs);
                   }
                   else if (fc.name === 'log_mission') {
                     const {goal, table, items} = fc.args as any;
@@ -181,27 +168,23 @@ export function LiveAudioHandler() {
               }
             },
             onerror: (e: any) => {
-              if (e.message?.includes("not found")) {
-                addLog("404 Error: Access Restricted. Select a valid API Key project.", "err");
-                setHasKey(false);
-              } else {
-                addLog("Brain Connectivity Lost", "err");
-              }
+              addLog(`Stream Error: ${e.message || 'Check Connectivity'}`, "err");
+              setIsMicActive(false);
             },
-            onclose: () => setIsMicActive(false),
+            onclose: () => {
+              addLog("Brain Session Closed", "sys");
+              setIsMicActive(false);
+            }
           },
           config: {
             responseModalities: [Modality.AUDIO],
             speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } },
             tools: [{ functionDeclarations: tools as any }],
-            systemInstruction: `
-              ${prompt}\n${hw}\n
-              STATE: Distance=${distance}cm, Mission=${mission}, Orders=${JSON.stringify(orders)}.
-            `
+            systemInstruction: `${prompt}\n${hw}\nHistory: ${history.join('->')}`
           }
         });
         sessionRef.current = sessionPromise;
-      } catch (e) { addLog("Critical Brain Error", "err"); }
+      } catch (e: any) { addLog(`Initialization Error: ${e.message}`, "err"); }
     }
 
     connectBrain();
@@ -212,20 +195,12 @@ export function LiveAudioHandler() {
       inputAudioCtx.close();
       outputAudioCtx.close();
     };
-  }, [hasKey, ip, distance, prompt, hw, mission, orders, tuning.duration, setMission, setOrders, setThought, setHasKey]);
-
-  if (!hasKey) {
-    return (
-      <button onClick={handleKeySelect} className="bg-red-900/60 border-red-500 text-red-200 text-[10px] px-4 py-1 animate-pulse">
-        ⚠️ ACTION REQUIRED: Select API Key Project
-      </button>
-    );
-  }
+  }, [hasKey, ip, distance, prompt, hw, mission, orders, tuning.turnMs, setMission, setOrders, setThought, setHasKey, history]);
 
   return (
     <div className="flex items-center gap-2 bg-black/50 px-3 py-1 rounded-full border border-cyan-500/30">
-      <div className={`w-2 h-2 rounded-full ${isMicActive ? 'bg-cyan-500 animate-ping' : 'bg-red-500'}`} />
-      <span className="text-[10px] text-cyan-400 font-mono tracking-tighter uppercase">Live Brain Online</span>
+      <div className={`w-2 h-2 rounded-full ${isMicActive ? 'bg-cyan-500 animate-pulse shadow-[0_0_8px_cyan]' : 'bg-red-500 shadow-[0_0_8px_red]'}`} />
+      <span className="text-[10px] text-cyan-400 font-mono tracking-tighter uppercase">Sync Hub {isMicActive ? 'Ready' : 'Offline'}</span>
     </div>
   );
 }
