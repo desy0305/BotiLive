@@ -3,7 +3,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {useAtom} from 'jotai';
 import {GoogleGenAI, Modality, Type, LiveServerMessage} from '@google/genai';
 import {
-  RobotIpAtom,
+  RobotAddressAtom,
   SystemPromptAtom,
   HardwareContextAtom,
   LogsAtom,
@@ -42,7 +42,8 @@ async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: 
 }
 
 export function LiveAudioHandler() {
-  const [ip] = useAtom(RobotIpAtom);
+  // Fix: changed RobotIpAtom to RobotAddressAtom to match exported member in atoms.tsx
+  const [address] = useAtom(RobotAddressAtom);
   const [prompt] = useAtom(SystemPromptAtom);
   const [hw] = useAtom(HardwareContextAtom);
   const [distance] = useAtom(RobotDistanceAtom);
@@ -78,6 +79,7 @@ export function LiveAudioHandler() {
       try {
         addLog("Initializing Neural Stream...", "sys");
         micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Correct initialization of GoogleGenAI
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
         
         const tools = [{
@@ -114,6 +116,7 @@ export function LiveAudioHandler() {
                 const int16 = new Int16Array(input.length);
                 for (let i = 0; i < input.length; i++) int16[i] = input[i] * 32768;
                 const base64 = encode(new Uint8Array(int16.buffer));
+                // CRITICAL: Use sessionPromise to prevent race conditions and send audio input
                 sessionPromise.then(s => s.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } }));
               };
               source.connect(scriptProcessor);
@@ -126,10 +129,12 @@ export function LiveAudioHandler() {
                 canvas.width = 320; canvas.height = 240;
                 canvas.getContext('2d')?.drawImage(video, 0, 0, 320, 240);
                 const base64 = canvas.toDataURL('image/jpeg', 0.5).split(',')[1];
+                // CRITICAL: Use sessionPromise to send visual input
                 sessionPromise.then(s => s.sendRealtimeInput({ media: { data: base64, mimeType: 'image/jpeg' } }));
               }, 1200);
             },
             onmessage: async (message: LiveServerMessage) => {
+              // Properly access and handle model's audio output
               const audioBase64 = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
               if (audioBase64) {
                 nextStartTime = Math.max(nextStartTime, outputAudioCtx.currentTime);
@@ -143,23 +148,27 @@ export function LiveAudioHandler() {
                 sources.add(source);
               }
               if (message.toolCall) {
-                const results = [];
                 for (const fc of message.toolCall.functionCalls) {
                   if (fc.name === 'move_robot') {
                     const {dir, speed, reason} = fc.args as any;
                     addLog(`MOTOR: ${dir.toUpperCase()} (${reason})`, "ai");
                     setThought(reason);
-                    fetch(`http://${ip}/move?dir=${dir}&speed=${speed}`, { mode: 'no-cors' }).catch(() => {});
-                    setTimeout(() => fetch(`http://${ip}/move?dir=stop`, { mode: 'no-cors' }).catch(() => {}), tuning.turnMs);
+                    // Use the robot address correctly with protocol check
+                    const fullUrl = address.startsWith('http') ? `${address}/move?dir=${dir}&speed=${speed}` : `http://${address}/move?dir=${dir}&speed=${speed}`;
+                    const stopUrl = address.startsWith('http') ? `${address}/move?dir=stop` : `http://${address}/move?dir=stop`;
+                    fetch(fullUrl, { mode: 'no-cors' }).catch(() => {});
+                    setTimeout(() => fetch(stopUrl, { mode: 'no-cors' }).catch(() => {}), tuning.turnMs);
                   }
                   else if (fc.name === 'log_mission') {
                     const {goal, table, items} = fc.args as any;
                     if (goal) setMission(goal);
                     if (table && items) setOrders(prev => ({...prev, [table]: items}));
                   }
-                  results.push({ id: fc.id, name: fc.name, response: { result: "ok" } });
+                  // Send function response back to the model
+                  sessionPromise.then(s => s.sendToolResponse({ 
+                    functionResponses: { id: fc.id, name: fc.name, response: { result: "ok" } } 
+                  }));
                 }
-                sessionPromise.then(s => s.sendToolResponse({ functionResponses: results as any }));
               }
               if (message.serverContent?.interrupted) {
                 sources.forEach(s => s.stop());
@@ -195,7 +204,7 @@ export function LiveAudioHandler() {
       inputAudioCtx.close();
       outputAudioCtx.close();
     };
-  }, [hasKey, ip, distance, prompt, hw, mission, orders, tuning.turnMs, setMission, setOrders, setThought, setHasKey, history]);
+  }, [hasKey, address, distance, prompt, hw, mission, orders, tuning.turnMs, setMission, setOrders, setThought, setHasKey, history]);
 
   return (
     <div className="flex items-center gap-2 bg-black/50 px-3 py-1 rounded-full border border-cyan-500/30">
