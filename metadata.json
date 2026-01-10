@@ -3,6 +3,6 @@
     "camera",
     "microphone"
   ],
-  "name": "Gemini Robotics AI Controller",
-  "description": "Autonomous navigation and voice interaction controller for Arduino robot cars."
+  "name": "EVA Robotics Core",
+  "description": "Advanced autonomous navigation and real-time voice interaction system for Arduino robotic platforms."
 }

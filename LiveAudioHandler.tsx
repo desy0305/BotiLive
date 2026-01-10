@@ -5,7 +5,6 @@ import {GoogleGenAI, Modality, Type, LiveServerMessage} from '@google/genai';
 import {
   RobotAddressAtom,
   SystemPromptAtom,
-  HardwareContextAtom,
   LogsAtom,
   AiThoughtAtom,
   RobotDistanceAtom,
@@ -41,7 +40,6 @@ async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: 
 
 export function LiveAudioHandler() {
   const [address] = useAtom(RobotAddressAtom);
-  const [prompt] = useAtom(SystemPromptAtom);
   const [distance] = useAtom(RobotDistanceAtom);
   const [tuning] = useAtom(TuningParamsAtom);
   const [, setLogs] = useAtom(LogsAtom);
@@ -64,13 +62,7 @@ export function LiveAudioHandler() {
   useEffect(() => { ordersRef.current = orders; }, [orders]);
 
   const addLog = (msg: string, type: 'ai' | 'sys' | 'err' = 'sys') => {
-    setLogs(prev => [`[EVA] [${type.toUpperCase()}] ${msg}`, ...prev].slice(0, 100));
-  };
-
-  const getRobotBase = () => {
-    let clean = address.trim().replace(/^https?:\/\//, '');
-    const proto = window.location.protocol === 'https:' ? 'https://' : 'http://';
-    return `${proto}${clean}`.replace(/\/$/, '');
+    setLogs(prev => [`[${new Date().toLocaleTimeString()}] [LIVE_${type.toUpperCase()}] ${msg}`, ...prev].slice(0, 100));
   };
 
   useEffect(() => {
@@ -99,8 +91,10 @@ export function LiveAudioHandler() {
         await inputAudioCtx.resume();
         await outputAudioCtx.resume();
 
-        addLog("Syncing EVA Core...", "sys");
+        addLog("Initializing Neural Stream...", "sys");
         micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // Always create a new instance right before use to ensure latest key
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
         
         const tools = [
@@ -108,7 +102,7 @@ export function LiveAudioHandler() {
             name: 'move_robot',
             parameters: {
               type: Type.OBJECT,
-              description: 'Physical motor pulse control.',
+              description: 'Send a physical movement command to the robotic base.',
               properties: {
                 dir: { type: Type.STRING, enum: ['fwd', 'bwd', 'left', 'right', 'stop'] },
                 speed: { type: Type.NUMBER },
@@ -122,7 +116,7 @@ export function LiveAudioHandler() {
             name: 'log_mission',
             parameters: {
               type: Type.OBJECT,
-              description: 'Update objective protocol or memory.',
+              description: 'Update the global objective protocol or stored memory bits.',
               properties: {
                 new_goal: { type: Type.STRING, description: 'E.g. Patrol, Autopilot, Standby' },
                 table_id: { type: Type.STRING },
@@ -136,13 +130,13 @@ export function LiveAudioHandler() {
           model: 'gemini-2.5-flash-native-audio-preview-12-2025',
           callbacks: {
             onopen: () => {
-              addLog("Link Stable.", "sys");
+              addLog("Link Established.", "sys");
               setIsMicActive(true);
               isActiveRef.current = true;
               
               sessionPromise.then(s => {
                 if (isActiveRef.current) {
-                  s.sendRealtimeInput({ text: "Hello Lazar, I am EVA, your Home Robot. I am online and synced with the " + missionRef.current + " protocol. What is the task you would like me to execute now?" });
+                  s.sendRealtimeInput({ text: "EVA System online. Currently operating in " + missionRef.current + " mode. Awaiting instructions." });
                 }
               });
 
@@ -156,7 +150,7 @@ export function LiveAudioHandler() {
                 const base64 = encode(new Uint8Array(int16.buffer));
                 sessionPromise.then(s => {
                   if (isActiveRef.current) {
-                    try { s.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } }); } catch(e) {}
+                    try { s.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } }); } catch(err) {}
                   }
                 });
               };
@@ -173,7 +167,7 @@ export function LiveAudioHandler() {
                 const base64 = canvas.toDataURL('image/jpeg', 0.4).split(',')[1];
                 sessionPromise.then(s => {
                   if (isActiveRef.current) {
-                    try { s.sendRealtimeInput({ media: { data: base64, mimeType: 'image/jpeg' } }); } catch(e) {}
+                    try { s.sendRealtimeInput({ media: { data: base64, mimeType: 'image/jpeg' } }); } catch(err) {}
                   }
                 });
               }, 2500);
@@ -182,7 +176,7 @@ export function LiveAudioHandler() {
                 if (!isActiveRef.current) return;
                 sessionPromise.then(s => {
                   if (isActiveRef.current) {
-                    s.sendRealtimeInput({ text: `[SYSTEM_HEARTBEAT] MISSION_PROTOCOL: "${missionRef.current}", SCANNER_DIST: ${distanceRef.current}cm, MEMORY_BUF: ${JSON.stringify(ordersRef.current)}` });
+                    s.sendRealtimeInput({ text: `[CORE_PULSE] PROTOCOL: "${missionRef.current}", DIST: ${distanceRef.current}cm, MEM: ${JSON.stringify(ordersRef.current)}` });
                   }
                 });
               }, 4000);
@@ -215,21 +209,25 @@ export function LiveAudioHandler() {
                     addLog(`MOTOR: ${dir.toUpperCase()}`, "ai");
                     setThought(reason);
                     
+                    let clean = address.trim().replace(/^https?:\/\//, '');
+                    const proto = window.location.protocol === 'https:' ? 'https://' : 'http://';
+                    const baseUrl = `${proto}${clean}`.replace(/\/$/, '');
+                    
                     const moveS = speed || tuning.speed;
                     const moveD = duration_ms || tuning.turnMs;
                     
-                    fetch(`${getRobotBase()}/move?dir=${dir}&speed=${moveS}`, { mode: 'no-cors' }).catch(() => {});
-                    setTimeout(() => fetch(`${getRobotBase()}/move?dir=stop`, { mode: 'no-cors' }).catch(() => {}), moveD);
+                    fetch(`${baseUrl}/move?dir=${dir}&speed=${moveS}`, { mode: 'no-cors' }).catch(() => {});
+                    setTimeout(() => fetch(`${baseUrl}/move?dir=stop`, { mode: 'no-cors' }).catch(() => {}), moveD);
                   }
                   if (fc.name === 'log_mission') {
                     const {new_goal, table_id, items} = fc.args as any;
                     if (new_goal) {
                       setMission(new_goal);
-                      addLog(`PROTOCOL UPDATED: ${new_goal}`, "sys");
+                      addLog(`MISSION_SW: ${new_goal}`, "sys");
                     }
                     if (table_id && items) {
                       setOrders(prev => ({ ...prev, [table_id]: items }));
-                      addLog(`PERSISTENCE EVENT: ${items} at ${table_id}`, "sys");
+                      addLog(`MEM_SYNC: ${table_id} -> ${items}`, "sys");
                     }
                   }
                   functionResponses.push({ id: fc.id, name: fc.name, response: { result: "ok" } });
@@ -240,7 +238,7 @@ export function LiveAudioHandler() {
               }
 
               if (message.serverContent?.interrupted) {
-                sources.forEach(s => { try { s.stop(); } catch(e) {} });
+                sources.forEach(s => { try { s.stop(); } catch(err) {} });
                 sources.clear();
                 nextStartTime = 0;
                 setIsEvaTalking(false);
@@ -249,24 +247,23 @@ export function LiveAudioHandler() {
             onerror: (e: any) => {
               isActiveRef.current = false;
               setIsMicActive(false);
-              addLog(`Link Fault: ${e.message}`, "err");
+              addLog(`Fault: ${e.message}`, "err");
             },
             onclose: () => {
               isActiveRef.current = false;
               setIsMicActive(false);
               setIsEvaTalking(false);
-              addLog("Core detached.", "sys");
+              addLog("Link Closed.", "sys");
             }
           },
           config: {
             responseModalities: [Modality.AUDIO],
             speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } },
             tools: [{ functionDeclarations: tools as any }],
-            systemInstruction: `ACT AS: EVA, Lazar's Home Robot.
-              - Context: You drive a 2WD Arduino robot.
-              - Languages: Bulgarian/English (switch naturally).
-              - Protocol Awareness: Respect the MISSION_PROTOCOL. If Lazar asks you to 'patrol' or 'guard', use 'log_mission' to change protocol.
-              - Autonomy: You have motor tools. Use them if a mission is active.`
+            systemInstruction: `ACT AS: EVA, an advanced home robotic intelligence.
+              - Context: You are piloting a 2WD Arduino base via tools.
+              - Behavior: Conversational but professional. Switch to user's language naturally.
+              - Safety: If telemetry indicates a hazard (Distance < 20cm), stop and explain.`
           }
         });
         sessionRef.current = sessionPromise;
@@ -280,11 +277,11 @@ export function LiveAudioHandler() {
       clearInterval(syncInterval);
       if (scriptNode) scriptNode.disconnect();
       if (sessionRef.current) {
-        sessionRef.current.then((s: any) => { try { s.close(); } catch(e) {} });
+        sessionRef.current.then((s: any) => { try { s.close(); } catch(err) {} });
       }
       if (micStream) micStream.getTracks().forEach(t => t.stop());
     };
-  }, [hasKey, address]);
+  }, [hasKey, address, tuning.speed, tuning.turnMs, setMission, setOrders, setThought]);
 
   return (
     <div className="flex items-center gap-2.5 bg-black/60 px-4 py-1.5 rounded-full border border-cyan-500/20 shadow-xl">
