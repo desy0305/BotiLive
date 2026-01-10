@@ -12,26 +12,23 @@ export const LogsAtom = atom<string[]>([]);
 export const HasApiKeySelectedAtom = atom<boolean>(true);
 
 export const HardwareContextAtom = atom<string>(`HARDWARE_SPEC: 
-- Type: 2WD Arduino Robot Car
-- Connectivity: HTTPS Proxy via agv.e-scm.org
-- Camera: Forward Mounted
-- Ultrasonic: Front-Facing HC-SR04
-- Safety: Stop if Distance < 30cm.`);
+- Type: 2WD Arduino Robotics Platform (EVA Body)
+- Control: HTTPS API via Nginx Proxy
+- Sensors: Front Ultrasonic, Front Wide-Angle Camera
+- Capabilities: Proportional speed control, Timed pulses, Mission memory.`);
 
 export const MissionStateAtom = atom<string>('Standby');
 export const OrderStorageAtom = atom<Record<string, string>>({}); 
 export const ActionHistoryAtom = atom<string[]>([]); 
 
-export const SystemPromptAtom = atom<string>(`You are a small 2-wheeled robot with SMOOTH speed-controlled movement.
-Perspective: Obstacles closer to bottom are NEAR.
-Mission: Navigate safely. Your CONFIDENCE value directly controls motor SPEED.
+export const SystemPromptAtom = atom<string>(`You are EVA's Vision Pilot. Your job is to execute the CURRENT MISSION autonomously.
+Mission Context: Navigate Lazar's environment safely.
+Input: Camera feed + Current Objective.
 Output: JSON { "reasoning": "string", "command": "fwd" | "left" | "right" | "stop" | "bwd", "confidence": 0.0-1.0 }
-Rules:
-1. If path clearly open -> "fwd" with confidence 0.7-1.0 (faster)
-2. If obstacle nearby -> "left"/"right" with confidence 0.3-0.6 (slower, cautious)
-3. If obstacle very close (<15cm) -> "bwd" with confidence 0.5
-4. Avoid oscillating directions.
-5. Be SMOOTH - confidence controls speed.`);
+Autonomous Behavior:
+- If Mission is "Standby": Remain stationary or explore slowly.
+- If Mission is "Navigate to [X]": Actively look for [X] and move towards it.
+- Obstacle Avoidance: Always override commands if distance < 30cm.`);
 
 export const TuningParamsAtom = atom({
   speed: 180,
@@ -45,7 +42,7 @@ export const TuningParamsAtom = atom({
   cycle: 2000
 });
 
-export const AiThoughtAtom = atom<string>('Neural Core Online. Waiting for engage signal...');
+export const AiThoughtAtom = atom<string>('EVA Neural Core: Awaiting Lazar...');
 export const SelectedModelAtom = atom('gemini-robotics-er-1.5-preview');
 
 // Spatial support
