@@ -50,13 +50,8 @@ function App() {
   useEffect(() => { historyRef.current = history; }, [history]);
   useEffect(() => { distRef.current = distance; }, [distance]);
 
-  // Unified Robot Communication Helper
   const getBaseUrl = () => {
-    let raw = addressRef.current.trim();
-    // Strip existing protocol if present to re-evaluate based on app security
-    raw = raw.replace(/^https?:\/\//, '');
-    
-    // If app is on HTTPS, robot MUST be on HTTPS or browser will block it
+    let raw = addressRef.current.trim().replace(/^https?:\/\//, '');
     const proto = window.location.protocol === 'https:' ? 'https://' : 'http://';
     return `${proto}${raw}`.replace(/\/$/, '');
   };
@@ -69,20 +64,16 @@ function App() {
       const res = await fetch(fullUrl, { 
         method: 'GET',
         signal: controller.signal, 
-        mode: 'cors', // Required to read distance JSON
+        mode: 'cors',
         cache: 'no-store'
       });
       clearTimeout(id);
       return res;
     } catch (e: any) {
-      if (e.name !== 'AbortError' && window.location.protocol === 'https:' && !fullUrl.startsWith('https')) {
-        console.error("Mixed Content Block likely:", fullUrl);
-      }
       return null;
     }
   };
 
-  // Status Polling Loop
   useEffect(() => {
     const timer = setInterval(async () => {
       if (!addressRef.current) return;
@@ -96,9 +87,8 @@ function App() {
       }
     }, 2500);
     return () => clearInterval(timer);
-  }, []);
+  }, [setDistance, setMode]);
 
-  // Vision Navigation Cycle
   useEffect(() => {
     if (!isAiActive) return;
     let cycleTimer: any;
@@ -115,7 +105,8 @@ function App() {
 
       try {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
-        const context = `${prompt}\n${hwContext}\nSTATE: Dist=${distRef.current}cm, Mode=${mission}, Memory=${JSON.stringify(orders)}`;
+        // Inform Vision Pilot of EVA's set mission
+        const context = `${prompt}\n${hwContext}\nCURRENT MISSION: ${mission}\nORDERS: ${JSON.stringify(orders)}\nSTATUS: Distance=${distRef.current}cm.`;
 
         const response = await ai.models.generateContent({
           model: model,
@@ -139,20 +130,18 @@ function App() {
         setThought(decision.reasoning);
         const cmd = decision.command?.toLowerCase() || 'stop';
 
-        setLogs(prev => [`[PILOT] CMD: ${cmd.toUpperCase()} (${(decision.confidence * 100).toFixed(0)}%) | ${decision.reasoning.substring(0, 40)}...`, ...prev].slice(0, 50));
+        setLogs(prev => [`[PILOT] EXEC: ${cmd.toUpperCase()} | TARGET: ${mission.substring(0,20)}`, ...prev].slice(0, 50));
 
         if (cmd !== 'stop') {
           setHistory(prev => [...prev, cmd].slice(-10));
           const aiSpeed = Math.round(tuning.speed * (0.4 + decision.confidence * 0.6));
-          const target = `${getBaseUrl()}/move?dir=${cmd}&speed=${aiSpeed}`;
-          
-          fetch(target, { mode: 'no-cors' }).catch(() => {});
+          fetch(`${getBaseUrl()}/move?dir=${cmd}&speed=${aiSpeed}`, { mode: 'no-cors' }).catch(() => {});
           setTimeout(() => {
             fetch(`${getBaseUrl()}/move?dir=stop`, { mode: 'no-cors' }).catch(() => {});
           }, tuning.turnMs);
         }
       } catch (err: any) {
-        setLogs(prev => [`[ERR] Neural Pulse Failed: ${err.message}`, ...prev].slice(0, 50));
+        setLogs(prev => [`[ERR] Vision Failure: ${err.message}`, ...prev].slice(0, 50));
       } finally {
         if (aiRef.current) cycleTimer = setTimeout(runVisionPulse, tuning.cycle);
       }
@@ -163,38 +152,39 @@ function App() {
   }, [isAiActive, model, prompt, tuning, setThought, setLogs, setHistory, hwContext, mission, orders]);
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-[#050505] text-[#e4e4e7] p-3 gap-3 overflow-hidden font-['Space_Mono'] selection:bg-cyan-500/30">
+    <div className="flex flex-col h-[100dvh] bg-[#050505] text-[#e4e4e7] p-3 gap-3 overflow-hidden font-['Space_Mono'] selection:bg-cyan-500/30 text-shadow-sm">
       <header className="flex justify-between items-center bg-zinc-900/80 px-4 py-2 rounded-lg border border-white/5 shadow-2xl shrink-0">
           <div className="flex items-center gap-4">
-             <div className="flex items-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-cyan-500 shadow-[0_0_12px_#00e5ff]" />
-                <h1 className="text-[11px] font-bold tracking-[0.4em] uppercase text-zinc-100">Neural Pilot Core</h1>
+             <div className="flex items-center gap-2 text-cyan-400">
+                <div className="w-2.5 h-2.5 rounded-full bg-cyan-500 shadow-[0_0_12px_#00e5ff] animate-pulse" />
+                <h1 className="text-[11px] font-bold tracking-[0.4em] uppercase">EVA SYSTEM CORE</h1>
              </div>
-             <div className="px-2 py-0.5 bg-zinc-800 rounded border border-white/5 text-[9px] text-zinc-500 font-mono">
-               RUNTIME: {window.location.hostname.includes('studio') ? 'AI-STUDIO' : 'CLOUD-PROD'}
+             <div className="px-2 py-0.5 bg-zinc-800/50 rounded border border-white/5 text-[9px] text-zinc-500 font-mono">
+               PULSE: OK
              </div>
           </div>
           <div className="flex items-center gap-4">
              {isLiveActive && <LiveAudioHandler />}
              <div className={`text-[9px] font-mono px-3 py-1 rounded-full border ${window.location.protocol === 'https:' ? 'bg-cyan-900/10 border-cyan-500/20 text-cyan-500' : 'bg-orange-900/10 border-orange-500/20 text-orange-500'}`}>
-                {window.location.protocol === 'https:' ? '🔒 HTTPS-ONLY' : '⚠️ INSECURE-LINK'}
+                {window.location.protocol === 'https:' ? '🔒 SECURE-TUNNEL' : '⚠️ UNSAFE'}
              </div>
           </div>
       </header>
 
       <main className="flex grow gap-3 overflow-hidden min-h-0">
         <section className="flex-[0.55] flex flex-col min-w-0 h-full">
-          <div className="grow relative bg-black rounded-lg border border-white/10 overflow-hidden shadow-2xl">
+          <div className="grow relative bg-black rounded-lg border border-white/10 overflow-hidden shadow-2xl group">
             <Content />
+            <div className="absolute inset-0 pointer-events-none border border-cyan-500/10 group-hover:border-cyan-500/20 transition-colors" />
           </div>
-          <div className="mt-3 bg-zinc-950 border border-cyan-900/30 rounded-lg p-3 shrink-0 h-28 overflow-y-auto custom-scrollbar shadow-inner">
+          <div className="mt-3 bg-zinc-950 border border-cyan-900/30 rounded-lg p-3 shrink-0 h-28 overflow-y-auto custom-scrollbar shadow-inner relative">
              <div className="flex items-center gap-2 mb-1.5 border-b border-cyan-900/20 pb-1">
                 <span className="text-[9px] font-bold text-cyan-600 uppercase tracking-widest flex items-center gap-2">
-                   <div className="w-1 h-1 bg-cyan-500 rounded-full animate-ping" /> Logic Stream
+                   <div className="w-1 h-1 bg-cyan-400 rounded-full animate-ping" /> EVA Neural Stream
                 </span>
              </div>
-             <p className="text-[11px] font-mono text-cyan-200 leading-snug italic">
-               {thought || 'Kernel loaded. Awaiting Neural cycle...'}
+             <p className="text-[11px] font-mono text-cyan-100 leading-snug italic opacity-90">
+               {thought || 'Kernel loaded. Synchronizing vision...'}
              </p>
           </div>
         </section>
