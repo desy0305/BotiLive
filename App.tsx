@@ -35,19 +35,19 @@ function App() {
   const [model] = useAtom(SelectedModelAtom);
   const [tuning] = useAtom(TuningParamsAtom);
   const [, setLogs] = useAtom(LogsAtom);
-  const [history, setHistory] = useAtom(ActionHistoryAtom);
+  const [, setHistory] = useAtom(ActionHistoryAtom);
   const [mission] = useAtom(MissionStateAtom);
   const [orders] = useAtom(OrderStorageAtom);
   const [, setHasKey] = useAtom(HasApiKeySelectedAtom);
 
   const aiRef = useRef(isAiActive);
   const addressRef = useRef(address);
-  const historyRef = useRef(history);
+  const missionRef = useRef(mission);
   const distRef = useRef(distance);
   
   useEffect(() => { aiRef.current = isAiActive; }, [isAiActive]);
   useEffect(() => { addressRef.current = address; }, [address]);
-  useEffect(() => { historyRef.current = history; }, [history]);
+  useEffect(() => { missionRef.current = mission; }, [mission]);
   useEffect(() => { distRef.current = distance; }, [distance]);
 
   const getBaseUrl = () => {
@@ -56,39 +56,31 @@ function App() {
     return `${proto}${raw}`.replace(/\/$/, '');
   };
 
-  const fetchRobotTelemetry = async (endpoint: string) => {
-    const fullUrl = `${getBaseUrl()}${endpoint}`;
-    try {
-      const controller = new AbortController();
-      const id = setTimeout(() => controller.abort(), 2000);
-      const res = await fetch(fullUrl, { 
-        method: 'GET',
-        signal: controller.signal, 
-        mode: 'cors',
-        cache: 'no-store'
-      });
-      clearTimeout(id);
-      return res;
-    } catch (e: any) {
-      return null;
-    }
-  };
-
+  // Telemetry Polling
   useEffect(() => {
     const timer = setInterval(async () => {
       if (!addressRef.current) return;
-      const res = await fetchRobotTelemetry('/status');
-      if (res) {
-        try {
+      try {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), 2000);
+        const res = await fetch(`${getBaseUrl()}/status`, { 
+          method: 'GET',
+          signal: controller.signal, 
+          mode: 'cors',
+          cache: 'no-store'
+        });
+        clearTimeout(id);
+        if (res.ok) {
           const data = await res.json();
           if (data.d !== undefined) setDistance(data.d);
           if (data.m !== undefined) setMode(data.m);
-        } catch(e) {}
-      }
+        }
+      } catch(e) {}
     }, 2500);
     return () => clearInterval(timer);
-  }, [setDistance, setMode]);
+  }, []);
 
+  // Vision Pilot Cycle
   useEffect(() => {
     if (!isAiActive) return;
     let cycleTimer: any;
@@ -105,15 +97,22 @@ function App() {
 
       try {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
-        // Inform Vision Pilot of EVA's set mission
-        const context = `${prompt}\n${hwContext}\nCURRENT MISSION: ${mission}\nORDERS: ${JSON.stringify(orders)}\nSTATUS: Distance=${distRef.current}cm.`;
+        const context = `
+          EVA NAV UNIT ACTIVE.
+          HW: ${hwContext}
+          CURRENT MISSION: ${missionRef.current}
+          MEMORY: ${JSON.stringify(orders)}
+          DISTANCE: ${distRef.current}cm
+          LOGIC: If mission != 'Standby', be AGGRESSIVE in reaching goal.
+          SAFE: Dist < ${tuning.safeDist} -> STOP.
+        `;
 
         const response = await ai.models.generateContent({
           model: model,
           contents: { parts: [{ text: context }, { inlineData: { mimeType: "image/jpeg", data: base64 } }] },
           config: {
             responseMimeType: "application/json",
-            temperature: tuning.temperature,
+            temperature: 0.1,
             responseSchema: {
               type: Type.OBJECT,
               properties: {
@@ -130,18 +129,16 @@ function App() {
         setThought(decision.reasoning);
         const cmd = decision.command?.toLowerCase() || 'stop';
 
-        setLogs(prev => [`[PILOT] EXEC: ${cmd.toUpperCase()} | TARGET: ${mission.substring(0,20)}`, ...prev].slice(0, 50));
-
-        if (cmd !== 'stop') {
-          setHistory(prev => [...prev, cmd].slice(-10));
-          const aiSpeed = Math.round(tuning.speed * (0.4 + decision.confidence * 0.6));
-          fetch(`${getBaseUrl()}/move?dir=${cmd}&speed=${aiSpeed}`, { mode: 'no-cors' }).catch(() => {});
-          setTimeout(() => {
-            fetch(`${getBaseUrl()}/move?dir=stop`, { mode: 'no-cors' }).catch(() => {});
-          }, tuning.turnMs);
+        if (cmd !== 'stop' && decision.confidence > 0.45) {
+          setLogs(prev => [`[PILOT] NAVIGATING: ${cmd.toUpperCase()} (Confidence: ${Math.round(decision.confidence*100)}%)`, ...prev].slice(0, 100));
+          const baseS = cmd === 'fwd' ? tuning.speed : tuning.turnSpeed;
+          const finalS = Math.max(tuning.minPower, Math.round(baseS * (0.6 + decision.confidence * 0.4)));
+          
+          fetch(`${getBaseUrl()}/move?dir=${cmd}&speed=${finalS}`, { mode: 'no-cors' }).catch(() => {});
+          setTimeout(() => fetch(`${getBaseUrl()}/move?dir=stop`, { mode: 'no-cors' }).catch(() => {}), tuning.turnMs);
         }
       } catch (err: any) {
-        setLogs(prev => [`[ERR] Vision Failure: ${err.message}`, ...prev].slice(0, 50));
+        setLogs(prev => [`[PILOT ERR] Cycle failed: ${err.message}`, ...prev].slice(0, 100));
       } finally {
         if (aiRef.current) cycleTimer = setTimeout(runVisionPulse, tuning.cycle);
       }
@@ -149,47 +146,41 @@ function App() {
 
     runVisionPulse();
     return () => clearTimeout(cycleTimer);
-  }, [isAiActive, model, prompt, tuning, setThought, setLogs, setHistory, hwContext, mission, orders]);
+  }, [isAiActive, model, tuning, orders]);
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-[#050505] text-[#e4e4e7] p-3 gap-3 overflow-hidden font-['Space_Mono'] selection:bg-cyan-500/30 text-shadow-sm">
-      <header className="flex justify-between items-center bg-zinc-900/80 px-4 py-2 rounded-lg border border-white/5 shadow-2xl shrink-0">
-          <div className="flex items-center gap-4">
+    <div className="flex flex-col h-[100dvh] bg-[#050505] text-[#e4e4e7] p-2 gap-2 overflow-hidden font-['Space_Mono'] selection:bg-cyan-500/30">
+      <header className="flex justify-between items-center bg-zinc-900/60 px-4 py-2 rounded-lg border border-white/5 shadow-xl shrink-0">
+          <div className="flex items-center gap-3">
              <div className="flex items-center gap-2 text-cyan-400">
-                <div className="w-2.5 h-2.5 rounded-full bg-cyan-500 shadow-[0_0_12px_#00e5ff] animate-pulse" />
-                <h1 className="text-[11px] font-bold tracking-[0.4em] uppercase">EVA SYSTEM CORE</h1>
+                <div className="w-2 h-2 rounded-full bg-cyan-500 shadow-[0_0_10px_#00e5ff] animate-pulse" />
+                <h1 className="text-[10px] font-bold tracking-widest uppercase">EVA SYSTEM</h1>
              </div>
-             <div className="px-2 py-0.5 bg-zinc-800/50 rounded border border-white/5 text-[9px] text-zinc-500 font-mono">
-               PULSE: OK
+             <div className="hidden md:block px-2 py-0.5 bg-zinc-800/50 rounded border border-white/5 text-[9px] text-zinc-500 font-mono">
+               OBJ: {mission}
              </div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
              {isLiveActive && <LiveAudioHandler />}
-             <div className={`text-[9px] font-mono px-3 py-1 rounded-full border ${window.location.protocol === 'https:' ? 'bg-cyan-900/10 border-cyan-500/20 text-cyan-500' : 'bg-orange-900/10 border-orange-500/20 text-orange-500'}`}>
-                {window.location.protocol === 'https:' ? '🔒 SECURE-TUNNEL' : '⚠️ UNSAFE'}
+             <div className={`text-[8px] font-mono px-2 py-1 rounded border ${window.location.protocol === 'https:' ? 'border-cyan-500/20 text-cyan-500' : 'border-orange-500/20 text-orange-500'}`}>
+                {window.location.protocol === 'https:' ? 'HTTPS OK' : 'INSECURE'}
              </div>
           </div>
       </header>
 
-      <main className="flex grow gap-3 overflow-hidden min-h-0">
-        <section className="flex-[0.55] flex flex-col min-w-0 h-full">
-          <div className="grow relative bg-black rounded-lg border border-white/10 overflow-hidden shadow-2xl group">
+      <main className="flex flex-col lg:flex-row grow gap-2 overflow-hidden min-h-0">
+        <section className="flex-[0.5] flex flex-col min-w-0 h-full">
+          <div className="grow relative bg-black rounded border border-white/5 overflow-hidden shadow-2xl">
             <Content />
-            <div className="absolute inset-0 pointer-events-none border border-cyan-500/10 group-hover:border-cyan-500/20 transition-colors" />
           </div>
-          <div className="mt-3 bg-zinc-950 border border-cyan-900/30 rounded-lg p-3 shrink-0 h-28 overflow-y-auto custom-scrollbar shadow-inner relative">
-             <div className="flex items-center gap-2 mb-1.5 border-b border-cyan-900/20 pb-1">
-                <span className="text-[9px] font-bold text-cyan-600 uppercase tracking-widest flex items-center gap-2">
-                   <div className="w-1 h-1 bg-cyan-400 rounded-full animate-ping" /> EVA Neural Stream
-                </span>
-             </div>
-             <p className="text-[11px] font-mono text-cyan-100 leading-snug italic opacity-90">
-               {thought || 'Kernel loaded. Synchronizing vision...'}
+          <div className="mt-2 bg-zinc-950 border border-cyan-900/20 rounded p-2 shrink-0 h-20 overflow-y-auto custom-scrollbar">
+             <p className="text-[10px] font-mono text-cyan-400/80 leading-tight italic">
+               {thought || 'EVA Kernel: Standing by for optical sync...'}
              </p>
           </div>
         </section>
 
-        <section className="flex-[0.45] min-w-0 h-full">
+        <section className="flex-[0.5] min-w-0 h-full overflow-y-auto custom-scrollbar">
            <ControlPanel />
         </section>
       </main>

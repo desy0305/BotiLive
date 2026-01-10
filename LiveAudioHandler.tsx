@@ -42,7 +42,6 @@ async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: 
 export function LiveAudioHandler() {
   const [address] = useAtom(RobotAddressAtom);
   const [prompt] = useAtom(SystemPromptAtom);
-  const [hw] = useAtom(HardwareContextAtom);
   const [distance] = useAtom(RobotDistanceAtom);
   const [tuning] = useAtom(TuningParamsAtom);
   const [, setLogs] = useAtom(LogsAtom);
@@ -65,7 +64,7 @@ export function LiveAudioHandler() {
   useEffect(() => { ordersRef.current = orders; }, [orders]);
 
   const addLog = (msg: string, type: 'ai' | 'sys' | 'err' = 'sys') => {
-    setLogs(prev => [`[EVA] [${type.toUpperCase()}] ${msg}`, ...prev].slice(0, 50));
+    setLogs(prev => [`[EVA] [${type.toUpperCase()}] ${msg}`, ...prev].slice(0, 100));
   };
 
   const getRobotBase = () => {
@@ -92,6 +91,7 @@ export function LiveAudioHandler() {
     const sources = new Set<AudioBufferSourceNode>();
     let micStream: MediaStream | null = null;
     let videoInterval: any;
+    let syncInterval: any;
     let scriptNode: ScriptProcessorNode | null = null;
 
     async function connectBrain() {
@@ -99,7 +99,7 @@ export function LiveAudioHandler() {
         await inputAudioCtx.resume();
         await outputAudioCtx.resume();
 
-        addLog("Initializing Neural Link...", "sys");
+        addLog("Syncing EVA Core...", "sys");
         micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
         
@@ -108,11 +108,11 @@ export function LiveAudioHandler() {
             name: 'move_robot',
             parameters: {
               type: Type.OBJECT,
-              description: 'Direct motor control with timed duration.',
+              description: 'Physical motor pulse control.',
               properties: {
                 dir: { type: Type.STRING, enum: ['fwd', 'bwd', 'left', 'right', 'stop'] },
-                speed: { type: Type.NUMBER, description: 'PWM speed 0-255' },
-                duration_ms: { type: Type.NUMBER, description: 'Pulse duration in milliseconds' },
+                speed: { type: Type.NUMBER },
+                duration_ms: { type: Type.NUMBER },
                 reason: { type: Type.STRING }
               },
               required: ['dir', 'speed', 'reason']
@@ -122,9 +122,9 @@ export function LiveAudioHandler() {
             name: 'log_mission',
             parameters: {
               type: Type.OBJECT,
-              description: 'Update objective or memory.',
+              description: 'Update objective protocol or memory.',
               properties: {
-                new_goal: { type: Type.STRING },
+                new_goal: { type: Type.STRING, description: 'E.g. Patrol, Autopilot, Standby' },
                 table_id: { type: Type.STRING },
                 items: { type: Type.STRING }
               }
@@ -136,13 +136,18 @@ export function LiveAudioHandler() {
           model: 'gemini-2.5-flash-native-audio-preview-12-2025',
           callbacks: {
             onopen: () => {
-              addLog("Brain Synchronized", "sys");
+              addLog("Link Stable.", "sys");
               setIsMicActive(true);
               isActiveRef.current = true;
               
+              sessionPromise.then(s => {
+                if (isActiveRef.current) {
+                  s.sendRealtimeInput({ text: "Hello Lazar, I am EVA, your Home Robot. I am online and synced with the " + missionRef.current + " protocol. What is the task you would like me to execute now?" });
+                }
+              });
+
               const source = inputAudioCtx.createMediaStreamSource(micStream!);
               scriptNode = inputAudioCtx.createScriptProcessor(4096, 1, 1);
-              
               scriptNode.onaudioprocess = (e) => {
                 if (!isActiveRef.current) return;
                 const input = e.inputBuffer.getChannelData(0);
@@ -151,7 +156,7 @@ export function LiveAudioHandler() {
                 const base64 = encode(new Uint8Array(int16.buffer));
                 sessionPromise.then(s => {
                   if (isActiveRef.current) {
-                    try { s.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } }); } catch(err) {}
+                    try { s.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } }); } catch(e) {}
                   }
                 });
               };
@@ -168,10 +173,19 @@ export function LiveAudioHandler() {
                 const base64 = canvas.toDataURL('image/jpeg', 0.4).split(',')[1];
                 sessionPromise.then(s => {
                   if (isActiveRef.current) {
-                    try { s.sendRealtimeInput({ media: { data: base64, mimeType: 'image/jpeg' } }); } catch(err) {}
+                    try { s.sendRealtimeInput({ media: { data: base64, mimeType: 'image/jpeg' } }); } catch(e) {}
                   }
                 });
-              }, 2000);
+              }, 2500);
+
+              syncInterval = setInterval(() => {
+                if (!isActiveRef.current) return;
+                sessionPromise.then(s => {
+                  if (isActiveRef.current) {
+                    s.sendRealtimeInput({ text: `[SYSTEM_HEARTBEAT] MISSION_PROTOCOL: "${missionRef.current}", SCANNER_DIST: ${distanceRef.current}cm, MEMORY_BUF: ${JSON.stringify(ordersRef.current)}` });
+                  }
+                });
+              }, 4000);
             },
             onmessage: async (message: LiveServerMessage) => {
               if (!isActiveRef.current) return;
@@ -200,15 +214,23 @@ export function LiveAudioHandler() {
                     const {dir, speed, reason, duration_ms} = fc.args as any;
                     addLog(`MOTOR: ${dir.toUpperCase()}`, "ai");
                     setThought(reason);
-                    const moveDur = duration_ms || tuning.turnMs;
-                    fetch(`${getRobotBase()}/move?dir=${dir}&speed=${speed}`, { mode: 'no-cors' }).catch(() => {});
-                    setTimeout(() => fetch(`${getRobotBase()}/move?dir=stop`, { mode: 'no-cors' }).catch(() => {}), moveDur);
+                    
+                    const moveS = speed || tuning.speed;
+                    const moveD = duration_ms || tuning.turnMs;
+                    
+                    fetch(`${getRobotBase()}/move?dir=${dir}&speed=${moveS}`, { mode: 'no-cors' }).catch(() => {});
+                    setTimeout(() => fetch(`${getRobotBase()}/move?dir=stop`, { mode: 'no-cors' }).catch(() => {}), moveD);
                   }
                   if (fc.name === 'log_mission') {
                     const {new_goal, table_id, items} = fc.args as any;
-                    if (new_goal) setMission(new_goal);
-                    if (table_id && items) setOrders(prev => ({ ...prev, [table_id]: items }));
-                    addLog("Internal State Updated", "sys");
+                    if (new_goal) {
+                      setMission(new_goal);
+                      addLog(`PROTOCOL UPDATED: ${new_goal}`, "sys");
+                    }
+                    if (table_id && items) {
+                      setOrders(prev => ({ ...prev, [table_id]: items }));
+                      addLog(`PERSISTENCE EVENT: ${items} at ${table_id}`, "sys");
+                    }
                   }
                   functionResponses.push({ id: fc.id, name: fc.name, response: { result: "ok" } });
                 }
@@ -233,61 +255,48 @@ export function LiveAudioHandler() {
               isActiveRef.current = false;
               setIsMicActive(false);
               setIsEvaTalking(false);
-              addLog("Neural link severed.", "sys");
+              addLog("Core detached.", "sys");
             }
           },
           config: {
             responseModalities: [Modality.AUDIO],
             speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } },
             tools: [{ functionDeclarations: tools as any }],
-            systemInstruction: `You are EVA (Electronic Virtual Assistant).
-- Role: Home assistant for Lazar.
-- Language: Bulgarian/English (Switch as Lazar does).
-- Greeting: PROACTIVELY say: "Hello Lazar, I am EVA, your Home Robot, what is the task you would like me to do execute now?" at the start.
-- Memory & Mission: ALWAYS maintain the objective Lazar gives you.
-- Status: Dist=${distanceRef.current}cm, Current Objective="${missionRef.current}", Memory=${JSON.stringify(ordersRef.current)}.`
+            systemInstruction: `ACT AS: EVA, Lazar's Home Robot.
+              - Context: You drive a 2WD Arduino robot.
+              - Languages: Bulgarian/English (switch naturally).
+              - Protocol Awareness: Respect the MISSION_PROTOCOL. If Lazar asks you to 'patrol' or 'guard', use 'log_mission' to change protocol.
+              - Autonomy: You have motor tools. Use them if a mission is active.`
           }
         });
         sessionRef.current = sessionPromise;
-      } catch (e: any) { addLog(`Init Error: ${e.message}`, "err"); }
+      } catch (e: any) { addLog(`Init Err: ${e.message}`, "err"); }
     }
 
     connectBrain();
     return () => {
       isActiveRef.current = false;
       clearInterval(videoInterval);
+      clearInterval(syncInterval);
       if (scriptNode) scriptNode.disconnect();
       if (sessionRef.current) {
         sessionRef.current.then((s: any) => { try { s.close(); } catch(e) {} });
       }
       if (micStream) micStream.getTracks().forEach(t => t.stop());
     };
-  }, [hasKey, address, prompt]);
+  }, [hasKey, address]);
 
   return (
-    <div className="flex items-center gap-3 bg-black/70 px-4 py-2 rounded-full border border-cyan-500/30 shadow-[0_0_20px_rgba(0,229,255,0.1)] transition-all">
+    <div className="flex items-center gap-2.5 bg-black/60 px-4 py-1.5 rounded-full border border-cyan-500/20 shadow-xl">
       <div className="relative">
-        <div className={`w-3 h-3 rounded-full transition-colors duration-500 ${isMicActive ? 'bg-cyan-500 shadow-[0_0_12px_#00e5ff]' : 'bg-zinc-800'} ${isEvaTalking ? 'scale-125' : ''}`} />
-        {isEvaTalking && <div className="absolute inset-0 w-full h-full rounded-full border border-cyan-400 animate-ping opacity-40" />}
+        <div className={`w-3 h-3 rounded-full transition-colors duration-500 ${isMicActive ? 'bg-cyan-500 shadow-[0_0_10px_#00e5ff]' : 'bg-zinc-800'}`} />
+        {isEvaTalking && <div className="absolute inset-0 w-full h-full rounded-full border-2 border-cyan-400 animate-ping opacity-30" />}
       </div>
-      <div className="flex flex-col min-w-[70px]">
-        <span className="text-[10px] text-cyan-400 font-bold tracking-widest uppercase font-mono">EVA BRAIN</span>
-        <span className="text-[7px] text-zinc-500 font-mono tracking-tighter uppercase">
-          {isEvaTalking ? 'Synthesizing...' : isMicActive ? 'Neural Link OK' : 'Offline'}
+      <div className="flex flex-col">
+        <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-widest font-mono">EVA BRAIN</span>
+        <span className="text-[7px] text-zinc-500 font-mono tracking-tighter uppercase font-bold">
+          {isEvaTalking ? 'Broadcasting' : isMicActive ? 'Linked' : 'Offline'}
         </span>
-      </div>
-      <div className="flex gap-0.5 items-end h-4 overflow-hidden">
-        {[1,2,3,4,5,6].map(i => (
-          <div 
-            key={i} 
-            className={`w-0.5 bg-cyan-500/40 rounded-full transition-all duration-300 ${isMicActive ? 'animate-bounce' : 'h-1'}`} 
-            style={{ 
-              height: isMicActive ? `${30 + Math.random()*70}%` : '2px', 
-              animationDelay: `${i*0.08}s`,
-              animationDuration: '0.6s'
-            }} 
-          />
-        ))}
       </div>
     </div>
   );

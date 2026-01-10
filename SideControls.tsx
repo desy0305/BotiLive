@@ -1,4 +1,3 @@
-
 /* tslint:disable */
 /**
  * @license
@@ -37,7 +36,9 @@ export function SideControls() {
   const [, setIsUploadedImage] = useAtom(IsUploadedImageAtom);
   const [, setBumpSession] = useAtom(BumpSessionAtom);
   const [, setImageSent] = useAtom(ImageSentAtom);
-  const resetState = useResetState();
+  
+  // Fix: Use type assertion to resolve the 'never' type error and ensure resetState is callable.
+  const resetState = useResetState() as () => void;
 
   return (
     <div className="flex flex-col gap-3">

@@ -6,14 +6,13 @@
 @tailwind utilities;
 
 :root {
-  --bg-color: #0F0F11;
-  --card-bg: #18181B;
+  --bg-color: #050505;
+  --card-bg: #101012;
   --accent-color: #00E5FF;
-  --border-color: #27272A;
-  --text-color-primary: #E4E4E7;
-  --text-color-secondary: #71717A;
-  --input-color: #242427;
-  --box-radius: 8px;
+  --border-color: #1a1a1c;
+  --text-color-primary: #f4f4f5;
+  --text-color-secondary: #71717a;
+  --input-color: #111113;
 }
 
 body {
@@ -25,44 +24,32 @@ body {
   overflow: hidden;
 }
 
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 10px;
+}
+
+@layer components {
+  .tactical-hud-panel {
+    @apply bg-black/60 backdrop-blur-xl border border-white/5 shadow-2xl;
+  }
+}
+
 input, select, textarea {
   background: var(--input-color);
   border: 1px solid var(--border-color);
   color: white;
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: 4px;
   font-family: inherit;
-  outline: none;
-}
-
-input:focus, textarea:focus {
-  border-color: var(--accent-color);
 }
 
 button {
-  cursor: pointer;
-  background: var(--input-color);
-  border: 1px solid var(--border-color);
-  color: white;
-  padding: 12px;
-  border-radius: 6px;
-  transition: all 0.2s;
-}
-
-button:hover {
-  border-color: var(--accent-color);
-  color: var(--accent-color);
-}
-
-button:active {
-  transform: translateY(1px);
-}
-
-button.secondary {
-  padding: 6px 12px;
-  min-height: 0;
-}
-
-.dark {
-  color-scheme: dark;
+  @apply transition-all active:scale-95 disabled:opacity-50;
 }

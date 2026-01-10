@@ -1,4 +1,3 @@
-
 /* tslint:disable */
 /**
  * @license
@@ -28,7 +27,10 @@ import {useResetState} from './hooks';
 export function ExampleImages() {
   const [, setImageSrc] = useAtom(ImageSrcAtom);
   const [, setIsUploadedImage] = useAtom(IsUploadedImageAtom);
-  const resetState = useResetState();
+  
+  // Fix: Use type assertion to resolve the 'never' type error and ensure resetState is callable.
+  const resetState = useResetState() as () => void;
+
   return (
     <div className="flex flex-wrap items-start gap-3 shrink-0 w-[190px]">
       {imageOptions.map((image) => (

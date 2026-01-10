@@ -1,4 +1,3 @@
-
 /* tslint:disable */
 /**
  * @license
@@ -32,9 +31,8 @@ import {
   ResponseJsonAtom,
 } from './atoms';
 
-// Fix: Explicitly defining the return type as '() => void' to prevent TypeScript's 
-// type inference from incorrectly collapsing to 'never' in consumers of this hook.
-export const useResetState = (): (() => void) => {
+// Fix: Remove explicit return type to improve TypeScript inference from the internal useCallback.
+export function useResetState() {
   const [, setImageSent] = useAtom(ImageSentAtom);
   const [, setBoundingBoxes2D] = useAtom(BoundingBoxes2DAtom);
   const [, setBoundingBoxMasks] = useAtom(BoundingBoxMasksAtom);
@@ -60,4 +58,4 @@ export const useResetState = (): (() => void) => {
     setRequestJson,
     setResponseJson,
   ]);
-};
+}
