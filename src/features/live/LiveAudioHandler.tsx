@@ -87,7 +87,7 @@ export function LiveAudioHandler() {
     ordersRef.current = orders;
   }, [orders]);
 
-  const addLog = (msg: string, type: 'ai' | 'sys' | 'err' = 'sys') => {
+  const addLog = (msg: string, type: 'ai' | 'api' | 'llm' | 'sys' | 'err' = 'sys') => {
     setLogs((prev) => [`[${new Date().toLocaleTimeString()}] [LIVE_${type.toUpperCase()}] ${msg}`, ...prev].slice(0, 100));
   };
 
@@ -118,6 +118,7 @@ export function LiveAudioHandler() {
 
         addLog('Requesting ephemeral Live token...', 'sys');
         const {token, model = LIVE_MODEL_ID} = await requestLiveToken();
+        addLog(`POST /api/live/token -> ${model}`, 'api');
         micStream = await navigator.mediaDevices.getUserMedia({audio: true});
         const ai = new GoogleGenAI({apiKey: token});
 
@@ -254,7 +255,9 @@ export function LiveAudioHandler() {
               }
 
               if (textParts.length > 0) {
-                setThought(textParts.join(' '));
+                const liveText = textParts.join(' ');
+                setThought(liveText);
+                addLog(liveText, 'llm');
               }
 
               if (message.toolCall) {
@@ -267,7 +270,10 @@ export function LiveAudioHandler() {
                     const moveDuration = Number(durationMs || tuning.turnMs);
                     addLog(`MOTOR: ${direction.toUpperCase()}`, 'ai');
                     setThought(typeof reason === 'string' ? reason : 'Live control command issued.');
-                    await moveRobot(addressRef.current, direction as RobotDirection, moveSpeed, moveDuration).catch((err: unknown) => {
+                    addLog(`POST /api/robot/move dir=${direction} speed=${moveSpeed} duration=${moveDuration}`, 'api');
+                    await moveRobot(addressRef.current, direction as RobotDirection, moveSpeed, moveDuration).then((response) => {
+                      addLog(`ROBOT ${direction.toUpperCase()} ${response.ok ? 'accepted' : 'failed'} ${response.trace ? `req=${response.trace.requestId}` : ''}`, 'ai');
+                    }).catch((err: unknown) => {
                       addLog(err instanceof Error ? err.message : String(err), 'err');
                     });
                   }

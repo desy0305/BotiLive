@@ -1,4 +1,4 @@
-import {useEffect, useRef} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {useAtom} from 'jotai';
 import {RobotDistanceAtom, RobotModeAtom} from '../../state/atoms';
 
@@ -6,6 +6,7 @@ export function Content() {
   const [distance] = useAtom(RobotDistanceAtom);
   const [mode] = useAtom(RobotModeAtom);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
 
   useEffect(() => {
     async function setupCamera() {
@@ -17,7 +18,7 @@ export function Content() {
           videoRef.current.srcObject = stream;
         }
       } catch (err) {
-        console.error('Camera access denied:', err);
+        setCameraError(err instanceof Error ? err.message : 'Camera stream is unavailable.');
       }
     }
 
@@ -33,6 +34,17 @@ export function Content() {
         muted
         className="w-full h-full object-cover grayscale-[20%] brightness-[1.1]"
       />
+
+      {cameraError && (
+        <div className="absolute inset-0 bg-black/80 flex items-center justify-center text-center p-8">
+          <div className="max-w-md border border-amber-500/30 bg-amber-950/20 rounded-md p-5">
+            <div className="text-amber-300 text-[10px] uppercase font-black tracking-[0.25em] mb-2">Camera Offline</div>
+            <p className="text-zinc-400 text-xs leading-relaxed">
+              {cameraError}. Close other camera users or grant browser camera permission, then reload BotiLive.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="absolute top-5 left-5 flex flex-col gap-2.5">
         <div

@@ -1,5 +1,6 @@
 import {GoogleGenAI, Type} from '@google/genai';
 import {createServer, type IncomingMessage, type ServerResponse} from 'node:http';
+import {randomUUID} from 'node:crypto';
 import {readFileSync, existsSync, statSync} from 'node:fs';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -151,6 +152,18 @@ function sendJson(req: IncomingMessage, res: ServerResponse, status: number, val
   res.end(JSON.stringify(value));
 }
 
+function requestId() {
+  return randomUUID().slice(0, 8);
+}
+
+function latency(startedAt: number) {
+  return Date.now() - startedAt;
+}
+
+function trace(requestId: string, route: string, startedAt: number, model?: string, status = 200) {
+  return {requestId, route, model, latencyMs: latency(startedAt), status};
+}
+
 function sendNoContent(req: IncomingMessage, res: ServerResponse) {
   setCommonHeaders(req, res);
   res.statusCode = 204;
@@ -198,6 +211,8 @@ async function handleVisionDecision(req: IncomingMessage, res: ServerResponse) {
     throw httpError(503, 'GEMINI_API_KEY is not configured on the server.');
   }
 
+  const id = requestId();
+  const startedAt = Date.now();
   const body = await readJson(req);
   const image = (body.image ?? {}) as Record<string, unknown>;
   const context = (body.context ?? {}) as Record<string, unknown>;
@@ -211,6 +226,7 @@ async function handleVisionDecision(req: IncomingMessage, res: ServerResponse) {
   const thinkingBudget = clamp(generationConfig.thinkingBudget, 0, 0, 24576);
   const temperature = Math.min(1, Math.max(0, Number(generationConfig.temperature ?? 0.1)));
 
+  console.info(`[api:${id}] POST /api/ai/vision-decision model=${model} mission=${String(context.mission ?? 'Standby')}`);
   const response = await ai.models.generateContent({
     model,
     contents: {
@@ -250,7 +266,9 @@ async function handleVisionDecision(req: IncomingMessage, res: ServerResponse) {
 
   const text = String(response.text ?? '{}');
   const decision = sanitizeDecision(JSON.parse(text) as Record<string, unknown>);
-  sendJson(req, res, 200, {decision});
+  const apiTrace = trace(id, '/api/ai/vision-decision', startedAt, model);
+  console.info(`[api:${id}] LLM ${decision.command} conf=${decision.confidence.toFixed(2)} ${apiTrace.latencyMs}ms`);
+  sendJson(req, res, 200, {decision: {...decision, rawText: text, trace: apiTrace}});
 }
 
 function chooseVisionModel(value: unknown) {
@@ -276,6 +294,8 @@ async function handleLiveToken(req: IncomingMessage, res: ServerResponse) {
     throw httpError(503, 'GEMINI_API_KEY is not configured on the server.');
   }
 
+  const id = requestId();
+  const startedAt = Date.now();
   await readJson(req, 1024);
   const expiresAt = new Date(Date.now() + env.liveTokenTtlSeconds * 1000);
   const newSessionExpiresAt = new Date(Date.now() + env.liveTokenStartSeconds * 1000);
@@ -297,24 +317,30 @@ async function handleLiveToken(req: IncomingMessage, res: ServerResponse) {
     },
   } as never);
 
+  const apiTrace = trace(id, '/api/live/token', startedAt, env.liveModel);
+  console.info(`[api:${id}] POST /api/live/token model=${env.liveModel} ${apiTrace.latencyMs}ms`);
   res.setHeader('Cache-Control', 'no-store');
-  sendJson(req, res, 200, {token: token.name, model: env.liveModel, expiresAt: expiresAt.toISOString()});
+  sendJson(req, res, 200, {token: token.name, model: env.liveModel, expiresAt: expiresAt.toISOString(), trace: apiTrace});
 }
 
 async function handleRobotStatus(req: IncomingMessage, res: ServerResponse, url: URL) {
+  const id = requestId();
+  const startedAt = Date.now();
   const baseUrl = robotBaseUrl(url.searchParams.get('address') || url.searchParams.get('baseUrl') || undefined);
   try {
     const response = await fetchWithTimeout(new URL('/status', baseUrl).toString(), {method: 'GET'});
     const text = await response.text();
     const payload = text ? JSON.parse(text) : {};
-    sendJson(req, res, response.ok ? 200 : 502, payload);
+    sendJson(req, res, 200, {...payload, ok: response.ok, trace: trace(id, '/api/robot/status', startedAt, undefined, response.ok ? 200 : 502)});
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Robot bridge is unavailable.';
-    sendJson(req, res, 503, {d: -1, m: 'OFFLINE', error: message});
+    sendJson(req, res, 200, {d: -1, m: 'OFFLINE', ok: false, error: message, trace: trace(id, '/api/robot/status', startedAt, undefined, 503)});
   }
 }
 
 async function handleRobotMove(req: IncomingMessage, res: ServerResponse) {
+  const id = requestId();
+  const startedAt = Date.now();
   const body = await readJson(req, 32 * 1024);
   const baseUrl = robotBaseUrl(body.address ?? body.baseUrl);
   const rawDir = typeof body.dir === 'string' ? body.dir.toLowerCase() : 'stop';
@@ -326,13 +352,14 @@ async function handleRobotMove(req: IncomingMessage, res: ServerResponse) {
   const durationMs = clamp(body.durationMs, dir === 'stop' ? 0 : 750, 0, 5000);
 
   try {
+    console.info(`[api:${id}] POST /api/robot/move dir=${dir} speed=${speed} duration=${durationMs}`);
     const response = await sendRobotMove(baseUrl, dir, speed);
     if (dir !== 'stop' && durationMs > 0) {
       setTimeout(() => {
         void sendRobotMove(baseUrl, 'stop', 0).catch(() => undefined);
       }, durationMs);
     }
-    sendJson(req, res, response.ok ? 200 : 502, {ok: response.ok, dir, speed, durationMs});
+    sendJson(req, res, response.ok ? 200 : 502, {ok: response.ok, dir, speed, durationMs, trace: trace(id, '/api/robot/move', startedAt, undefined, response.ok ? 200 : 502)});
   } catch (error) {
     if (dir !== 'stop') {
       await sendRobotMove(baseUrl, 'stop', 0).catch(() => undefined);

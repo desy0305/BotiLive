@@ -44,17 +44,49 @@ export function ControlPanel() {
   };
 
   const executeRobotCommand = async (dir: RobotDirection, speed?: number, durationMs?: number) => {
+    const started = new Date().toLocaleTimeString();
+    setLogs((prev) => [`[${started}] [API] POST /api/robot/move dir=${dir} speed=${speed ?? 0} duration=${durationMs ?? 0}`, ...prev].slice(0, 160));
     try {
-      await moveRobot(address, dir, speed, durationMs);
+      const response = await moveRobot(address, dir, speed, durationMs);
+      setLogs((prev) => [
+        `[${new Date().toLocaleTimeString()}] [ROBOT] ${dir.toUpperCase()} ${response.ok ? 'accepted' : 'failed'} ${
+          response.trace ? `req=${response.trace.requestId} ${response.trace.latencyMs}ms` : ''
+        }`,
+        ...prev,
+      ].slice(0, 160));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setLogs((prev) => [`[${new Date().toLocaleTimeString()}] [ERR] ${message}`, ...prev].slice(0, 100));
+      setLogs((prev) => [`[${new Date().toLocaleTimeString()}] [ERR] ${message}`, ...prev].slice(0, 160));
     }
+  };
+
+  const logClass = (line: string) => {
+    if (line.includes('[ERR]')) return 'text-red-400 border-red-900/60 bg-red-950/10';
+    if (line.includes('[LLM') || line.includes('[LIVE_LLM]')) return 'text-fuchsia-300 border-fuchsia-900/60 bg-fuchsia-950/10';
+    if (line.includes('[API]') || line.includes('[LIVE_API]')) return 'text-sky-300 border-sky-900/60 bg-sky-950/10';
+    if (line.includes('[ROBOT]') || line.includes('[PILOT]') || line.includes('[LIVE_AI]')) return 'text-emerald-300 border-emerald-900/60 bg-emerald-950/10';
+    if (line.includes('[CORE]')) return 'text-cyan-300 border-cyan-900/60 bg-cyan-950/10';
+    return 'text-zinc-500 border-zinc-800 bg-zinc-950/30';
   };
 
   return (
     <div className="flex flex-col bg-zinc-950/80 rounded-xl border border-white/5 overflow-hidden shadow-2xl backdrop-blur-md">
       <div className="p-3 border-b border-white/10 bg-zinc-900/40 space-y-3 shrink-0">
+        <div className="grid grid-cols-3 gap-2">
+          <div className={`rounded border px-2 py-1.5 ${hasGeminiKey ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-red-500/30 bg-red-500/10 text-red-300'}`}>
+            <div className="text-[7px] uppercase text-zinc-500 font-black">Gemini</div>
+            <div className="text-[9px] uppercase font-black">{hasGeminiKey ? 'Ready' : 'Missing'}</div>
+          </div>
+          <div className={`rounded border px-2 py-1.5 ${isAiActive ? 'border-orange-500/30 bg-orange-500/10 text-orange-300' : 'border-zinc-800 bg-black/30 text-zinc-500'}`}>
+            <div className="text-[7px] uppercase text-zinc-500 font-black">Vision</div>
+            <div className="text-[9px] uppercase font-black">{isAiActive ? 'Active' : 'Idle'}</div>
+          </div>
+          <div className={`rounded border px-2 py-1.5 ${isLiveActive ? 'border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-300' : 'border-zinc-800 bg-black/30 text-zinc-500'}`}>
+            <div className="text-[7px] uppercase text-zinc-500 font-black">Live</div>
+            <div className="text-[9px] uppercase font-black">{isLiveActive ? 'Linked' : 'Offline'}</div>
+          </div>
+        </div>
+
         <div className="flex gap-2 text-left">
           <div className="flex-1 flex flex-col gap-1">
             <span className="text-[7px] font-bold text-zinc-500 uppercase tracking-widest px-1">Autonomy Model</span>
@@ -245,26 +277,18 @@ export function ControlPanel() {
         </div>
       </div>
 
-      <div className="bg-black flex flex-col min-h-[250px] max-h-[400px]">
+      <div className="bg-black flex flex-col min-h-[300px] max-h-[520px]">
         <div className="px-3 py-2 bg-zinc-900/60 flex justify-between items-center border-b border-white/5">
-          <span className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.4em]">Telemetry_Log</span>
+          <span className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.25em]">API + LLM Event Stream</span>
           <button onClick={() => setLogs([])} className="text-[8px] text-zinc-600 hover:text-white uppercase font-bold">
             Flush
           </button>
         </div>
-        <div className="grow p-3 font-mono text-[9px] leading-[1.6] overflow-y-auto custom-scrollbar flex flex-col-reverse text-left">
+        <div className="grow p-3 font-mono text-[9px] leading-[1.55] overflow-y-auto custom-scrollbar flex flex-col-reverse text-left gap-1">
           {logs.map((l, i) => (
             <div
               key={`${i}-${l}`}
-              className={`mb-1 pl-2 border-l-2 transition-all ${
-                l.includes('[PILOT]')
-                  ? 'text-emerald-500 border-emerald-900/40'
-                  : l.includes('[ERR]')
-                    ? 'text-red-500 border-red-900/40'
-                    : l.includes('[CORE]')
-                      ? 'text-cyan-400 border-cyan-900/40'
-                      : 'text-zinc-600 border-zinc-800'
-              }`}
+              className={`rounded-sm px-2 py-1 border-l-2 break-words transition-all ${logClass(l)}`}
             >
               {l}
             </div>

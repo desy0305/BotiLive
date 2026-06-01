@@ -33,5 +33,7 @@ export async function requestVisionDecision(
     confidence: Number.isFinite(confidence) ? confidence : 0,
     speed: Number.isFinite(Number(decision.speed)) ? Number(decision.speed) : undefined,
     durationMs: Number.isFinite(Number(decision.durationMs)) ? Number(decision.durationMs) : undefined,
+    rawText: typeof decision.rawText === 'string' ? decision.rawText : undefined,
+    trace: decision.trace && typeof decision.trace === 'object' ? (decision.trace as VisionDecision['trace']) : undefined,
   };
 }

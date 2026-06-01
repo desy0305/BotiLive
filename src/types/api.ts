@@ -10,6 +10,10 @@ export interface RobotMoveRequest {
 export interface RobotMoveResponse {
   ok?: boolean;
   message?: string;
+  dir?: RobotDirection;
+  speed?: number;
+  durationMs?: number;
+  trace?: ApiTrace;
 }
 
 export interface RobotStatusResponse {
@@ -17,6 +21,8 @@ export interface RobotStatusResponse {
   distance?: number;
   m?: string;
   mode?: string;
+  error?: string;
+  trace?: ApiTrace;
 }
 
 export interface VisionDecisionRequest {
@@ -45,12 +51,15 @@ export interface VisionDecision {
   confidence: number;
   speed?: number;
   durationMs?: number;
+  rawText?: string;
+  trace?: ApiTrace;
 }
 
 export interface LiveTokenResponse {
   token: string;
   model: string;
   expiresAt?: string;
+  trace?: ApiTrace;
 }
 
 export interface PublicConfigResponse {
@@ -66,4 +75,12 @@ export interface PublicConfigResponse {
     minDistanceCm: number;
   };
   hasGeminiKey: boolean;
+}
+
+export interface ApiTrace {
+  requestId: string;
+  route: string;
+  model?: string;
+  latencyMs: number;
+  status?: number;
 }

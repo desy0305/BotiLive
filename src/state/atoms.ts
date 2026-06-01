@@ -40,5 +40,5 @@ export const TuningParamsAtom = atom({
   thinkingBudget: 0,
 });
 
-export const AiThoughtAtom = atom<string>('EVA: Neural Core Initialized.');
+export const AiThoughtAtom = atom<string>('BotiLive: robotics console initialized.');
 export const SelectedModelAtom = atom(DEFAULT_VISION_MODEL);

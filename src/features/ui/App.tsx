@@ -1,6 +1,6 @@
 import {useEffect, useRef} from 'react';
 import {useAtom} from 'jotai';
-import {Content} from '../live/Content';
+import {Content} from './Content';
 import {ControlPanel} from '../robot/ControlPanel';
 import {LiveAudioHandler} from '../live/LiveAudioHandler';
 import {requestVisionDecision} from '../ai/api';
@@ -45,6 +45,9 @@ function App() {
   const addressRef = useRef(address);
   const missionRef = useRef(mission);
   const distRef = useRef(distance);
+  const pushLog = (message: string) => {
+    setLogs((prev) => [`[${new Date().toLocaleTimeString()}] ${message}`, ...prev].slice(0, 160));
+  };
 
   useEffect(() => {
     aiRef.current = isAiActive;
@@ -64,8 +67,14 @@ function App() {
 
   useEffect(() => {
     getJson<PublicConfigResponse>('/api/config')
-      .then((config) => setHasGeminiKey(Boolean(config.hasGeminiKey)))
-      .catch(() => setHasGeminiKey(false));
+      .then((config) => {
+        setHasGeminiKey(Boolean(config.hasGeminiKey));
+        pushLog(`[API] GET /api/config -> ${config.hasGeminiKey ? 'Gemini key ready' : 'Gemini key missing'} | live=${config.models.live}`);
+      })
+      .catch((err) => {
+        setHasGeminiKey(false);
+        pushLog(`[ERR] GET /api/config -> ${err instanceof Error ? err.message : String(err)}`);
+      });
   }, [setHasGeminiKey]);
 
   useEffect(() => {
@@ -130,6 +139,7 @@ function App() {
 
       try {
         const base64 = captureVideoFrameBase64(video, {width: 640, height: 480, quality: 0.5});
+        pushLog(`[API] POST /api/ai/vision-decision model=${model} mission=${missionRef.current} frame=640x480`);
         const decision = await requestVisionDecision({
           model,
           image: {mimeType: 'image/jpeg', data: base64},
@@ -149,24 +159,28 @@ function App() {
 
         setThought(decision.reasoning);
         const cmd = decision.command.toLowerCase() as RobotDirection;
+        const trace = decision.trace ? `req=${decision.trace.requestId} ${decision.trace.latencyMs}ms` : 'req=local';
+        pushLog(
+          `[LLM] ${trace} ${decision.command.toUpperCase()} conf=${Math.round(decision.confidence * 100)}% :: ${
+            decision.rawText ?? decision.reasoning
+          }`,
+        );
 
         if (cmd !== 'stop' && decision.confidence > 0.45) {
-          const time = new Date().toLocaleTimeString();
-          setLogs((prev) => [
-            `[${time}] [PILOT] ${cmd.toUpperCase()} (${Math.round(decision.confidence * 100)}%)`,
-            ...prev,
-          ].slice(0, 100));
-
           const baseSpeed = cmd === 'fwd' || cmd === 'bwd' ? tuning.speed : tuning.turnSpeed;
           const finalSpeed = decision.speed ?? Math.max(tuning.minPower, Math.round(baseSpeed * (0.6 + decision.confidence * 0.4)));
           const durationMs = decision.durationMs ?? tuning.turnMs;
           const commandAddress = addressRef.current;
 
-          await moveRobot(commandAddress, cmd, finalSpeed, durationMs);
+          pushLog(`[API] POST /api/robot/move dir=${cmd} speed=${finalSpeed} duration=${durationMs}`);
+          const moveResponse = await moveRobot(commandAddress, cmd, finalSpeed, durationMs);
+          pushLog(`[ROBOT] move ${moveResponse.ok ? 'accepted' : 'failed'} ${moveResponse.trace ? `req=${moveResponse.trace.requestId} ${moveResponse.trace.latencyMs}ms` : ''}`);
+        } else {
+          pushLog(`[ROBOT] no movement: command=${cmd} confidence=${Math.round(decision.confidence * 100)}%`);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        setLogs((prev) => [`[ERR] Vision Cycle: ${message}`, ...prev].slice(0, 100));
+        pushLog(`[ERR] Vision Cycle: ${message}`);
       } finally {
         if (aiRef.current) {
           cycleTimer = window.setTimeout(runVisionPulse, tuning.cycle);
@@ -188,7 +202,7 @@ function App() {
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2.5 text-cyan-400">
             <div className="w-2.5 h-2.5 rounded-full bg-cyan-500 shadow-[0_0_15px_#00e5ff] animate-pulse" />
-            <h1 className="text-xs font-black tracking-[0.2em] uppercase">EVA_OS_v2.5</h1>
+            <h1 className="text-xs font-black tracking-[0.2em] uppercase">BotiLive Console</h1>
           </div>
           <div className="hidden lg:flex items-center gap-2 px-3 py-1 bg-black/40 rounded-full border border-white/5 text-[9px] text-cyan-500/80 font-mono">
             <span className="opacity-40 uppercase">OBJ:</span> {mission.toUpperCase()}
@@ -209,10 +223,10 @@ function App() {
           </div>
           <div className="bg-zinc-950 border border-cyan-900/20 rounded-2xl p-4 shrink-0 h-28 overflow-y-auto custom-scrollbar shadow-inner relative">
             <div className="absolute top-2 right-3 text-[7px] text-cyan-500/30 font-bold uppercase tracking-widest">
-              Neural_Thought_Stream
+              Latest_LLM_Response
             </div>
             <p className="text-[11px] font-mono text-cyan-400/90 leading-relaxed italic pr-4">
-              {thought || 'EVA Kernel: Neural link establishing. Standing by for optical sync...'}
+              {thought || 'BotiLive is ready. Start Vision Pilot or Live Link to stream model responses here.'}
             </p>
           </div>
         </section>
