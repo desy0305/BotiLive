@@ -1,0 +1,12 @@
+.git
+.env
+.env.*
+!.env.example
+node_modules
+dist
+server/dist
+coverage
+logs
+*.log
+Dockerfile
+docker-compose.override.yml

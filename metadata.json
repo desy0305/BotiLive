@@ -1,8 +1,0 @@
-{
-  "requestFramePermissions": [
-    "camera",
-    "microphone"
-  ],
-  "name": "EVA Robotics Core",
-  "description": "Advanced autonomous navigation and real-time voice interaction system for Arduino robotic platforms."
-}

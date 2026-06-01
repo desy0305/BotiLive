@@ -1,7 +1,6 @@
-
+import {useEffect, useRef} from 'react';
 import {useAtom} from 'jotai';
-import React, {useEffect, useRef} from 'react';
-import {RobotDistanceAtom, RobotModeAtom} from './atoms';
+import {RobotDistanceAtom, RobotModeAtom} from '../../state/atoms';
 
 export function Content() {
   const [distance] = useAtom(RobotDistanceAtom);
@@ -12,16 +11,17 @@ export function Content() {
     async function setupCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+          video: {facingMode: 'environment', width: {ideal: 1280}, height: {ideal: 720}},
         });
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
       } catch (err) {
-        console.error("Camera access denied:", err);
+        console.error('Camera access denied:', err);
       }
     }
-    setupCamera();
+
+    void setupCamera();
   }, []);
 
   return (
@@ -33,10 +33,13 @@ export function Content() {
         muted
         className="w-full h-full object-cover grayscale-[20%] brightness-[1.1]"
       />
-      
-      {/* 1. Tactical HUD Overlays */}
+
       <div className="absolute top-5 left-5 flex flex-col gap-2.5">
-        <div className={`flex flex-col bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-sm border-l-4 font-mono shadow-xl ${distance < 30 && distance !== -1 ? 'border-red-500 text-red-400' : 'border-cyan-500 text-cyan-400'}`}>
+        <div
+          className={`flex flex-col bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-sm border-l-4 font-mono shadow-xl ${
+            distance < 30 && distance !== -1 ? 'border-red-500 text-red-400' : 'border-cyan-500 text-cyan-400'
+          }`}
+        >
           <span className="text-[8px] uppercase tracking-tighter opacity-60">LIDAR_DIST</span>
           <span className="text-sm font-bold">{distance === -1 ? 'SCANNING' : `${distance}CM`}</span>
         </div>
@@ -45,8 +48,7 @@ export function Content() {
           <span className="text-sm font-bold uppercase">{mode}</span>
         </div>
       </div>
-      
-      {/* 2. Visual Identity Bar */}
+
       <div className="absolute bottom-5 left-5 right-5 bg-black/50 backdrop-blur-sm p-3 border border-white/5 rounded flex justify-between items-center">
         <div className="flex items-center gap-3">
           <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-[pulse_1.5s_infinite] shadow-[0_0_8px_#22c55e]" />
@@ -60,12 +62,11 @@ export function Content() {
         </div>
       </div>
 
-      {/* 3. Distance Warning Overlay */}
       {distance < 20 && distance !== -1 && (
         <div className="absolute inset-0 border-[10px] border-red-600/20 pointer-events-none animate-pulse flex items-center justify-center">
-           <div className="bg-red-600 text-white px-6 py-2 rounded font-bold uppercase tracking-[0.5em] shadow-2xl">
-             Collision Warning
-           </div>
+          <div className="bg-red-600 text-white px-6 py-2 rounded font-bold uppercase tracking-[0.5em] shadow-2xl">
+            Collision Warning
+          </div>
         </div>
       )}
     </div>

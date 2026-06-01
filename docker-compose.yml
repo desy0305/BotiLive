@@ -1,0 +1,30 @@
+services:
+  botilive:
+    build: .
+    image: botilive:latest
+    ports:
+      - "50055:50055"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PORT: "50055"
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_AUTONOMY_MODEL: ${GEMINI_AUTONOMY_MODEL:-gemini-robotics-er-1.6-preview}
+      GEMINI_FALLBACK_MODEL: ${GEMINI_FALLBACK_MODEL:-gemini-3.5-flash}
+      GEMINI_LIVE_MODEL: ${GEMINI_LIVE_MODEL:-gemini-3.1-flash-live-preview}
+      ROBOT_BASE_URL: ${ROBOT_BASE_URL:-http://agv.e-scm.org}
+      ROBOT_ALLOWED_HOSTS: ${ROBOT_ALLOWED_HOSTS:-agv.e-scm.org}
+      ROBOT_COMMAND_TIMEOUT_MS: ${ROBOT_COMMAND_TIMEOUT_MS:-1500}
+      ROBOT_MIN_DISTANCE_CM: ${ROBOT_MIN_DISTANCE_CM:-30}
+      LIVE_TOKEN_TTL_SECONDS: ${LIVE_TOKEN_TTL_SECONDS:-1800}
+      LIVE_TOKEN_START_SECONDS: ${LIVE_TOKEN_START_SECONDS:-60}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:50055}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
